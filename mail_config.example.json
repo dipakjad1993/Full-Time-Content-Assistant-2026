@@ -1,0 +1,9 @@
+{
+  "smtp_host": "",
+  "smtp_port": 587,
+  "smtp_user": "",
+  "smtp_pass": "",
+  "smtp_from": "",
+  "smtp_use_tls": true,
+  "note": "Copy this file to mail_config.json and fill the empty fields to enable the Email Me the PDF feature. Alternatively set the SMTP_HOST / SMTP_PORT / SMTP_USER / SMTP_PASS / SMTP_FROM / SMTP_USE_TLS environment variables. For Gmail: smtp_host = smtp.gmail.com, smtp_port = 587, smtp_user = your gmail address, smtp_pass = a 16-character Gmail App Password (enable 2-Step Verification first)."
+}

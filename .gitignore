@@ -1,0 +1,25 @@
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+.venv/
+venv/
+env/
+
+# Runtime / logs
+server.log
+server.log.err
+
+# Test output
+test_output/
+
+# Secrets - never commit real SMTP credentials
+mail_config.json
+
+# OS
+Thumbs.db
+.DS_Store
+
+# IDE
+.vscode/
+.idea/

@@ -1,0 +1,31 @@
+{
+  "platform": "Intent, Entity & Semantic Intelligence Platform",
+  "version": "1.0.0",
+  "modules": {
+    "M01": "Real-Time SERP & Knowledge Graph Parsing",
+    "M02": "Multi-Engine GEO & AEO Simulator",
+    "M03": "Semantic Content Structuring & Schema Generation",
+    "M04": "Experience & Gap Profiler (E-E-A-T Engine)",
+    "M05": "Internal Link & Cannibalization Defense Engine",
+    "M06": "Algorithmic Fluff & Cliche De-Coder",
+    "M07": "Real-Time Citation & Source Verifier",
+    "M08": "Interactive & Multi-Modal Asset Blueprint",
+    "M09": "Post-Publish AI Overview / GEO Tracker",
+    "M10": "JavaScript / Client-Side Rendering Simulator",
+    "M11": "Synthetic RAG Tester",
+    "M12": "Brand Compliance & Legal Guardrail Engine",
+    "M13": "Multi-Search Engine Schema Payload Generator",
+    "M14": "Audience Intent & Bounce-Risk Predictor",
+    "M15": "Post-Publish Delta & Content Decay Engine",
+    "M16": "Edge Routing & CDN Injection Previewer",
+    "M17": "Multi-Variant Entity A/B Testing Engine",
+    "M18": "Indexing Pipeline & Server Log Sentinel",
+    "M19": "Global Localization & Hreflang Entity Synchronizer",
+    "M20": "Digital PR & Knowledge Graph Entity Alignment Engine",
+    "M21": "Rendering & DOM Efficiency Inspector"
+  },
+  "supported_locales": ["en-US", "en-GB", "en-AU", "en-CA", "en-IN", "de-DE", "fr-FR", "ja-JP", "zh-CN", "es-ES", "pt-BR"],
+  "cdn_providers": ["cloudflare", "fastly", "akamai", "cloudfront"],
+  "js_frameworks": ["react", "nextjs", "angular", "vue", "nuxt"],
+  "render_modes": ["ssr", "csr", "isr", "ssg"]
+}

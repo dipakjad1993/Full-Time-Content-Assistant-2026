@@ -258,6 +258,241 @@ Each module output contains a consistent structure:
 - **Detailed analysis** — collapsible deep-dive per sub-topic.
 - **Automatic issue rows** — any problem value is highlighted red.
 
+### The 21 Modules — Real Screenshots & Detailed Outputs
+
+> Every screenshot below is a **real capture** of the module's view from a live 21-module analysis of a published article (Wikipedia's *Customer Relationship Management*) in the running tool.
+
+#### Module 01 — SERP & Knowledge Graph
+![M01 SERP & Knowledge Graph](screenshots/module-m01.png)
+
+| | |
+|---|---|
+| **What it analyzes** | Live SERP features, ranking results, entity graph, and knowledge-panel readiness for the target entity |
+| **Key outputs** | `live_serp_results`, `serp_features`, `paa_clusters`, `entity_graph`, `entity_coverage`, `topical_authority_score`, `serp_format_analysis`, `keyword_landscape`, `competitive_gap_summary`, `knowledge_panel_ready`, `featured_snippet_ready`, `paa_ready`, `ai_overview_ready` |
+| **Live data** | DuckDuckGo SERP (real results + PAA), Wikidata entity Q-ID matching (`wikidata_verified`) |
+
+Detects which SERP features the target can realistically win, analyzes People-Also-Ask clusters, and checks whether the page is structured to trigger the Knowledge Panel, Featured Snippet, or AI Overview.
+
+#### Module 02 — GEO & AEO Simulator
+![M02 GEO & AEO Simulator](screenshots/module-m02.png)
+
+| | |
+|---|---|
+| **What it analyzes** | Generative & Answer Engine optimization readiness for Google AI Overview, ChatGPT, Perplexity, and Gemini |
+| **Key outputs** | `geo_readiness_score`, `geo_signal_score`, `geo_signal_tier`, `engine_specific_strategies`, `answer_triggers`, `citation_gap_analysis`, `engine_readiness`, `geo_issues`, `citation_density`, `statistic_density`, `specific_recommendations` |
+| **Live data** | Live page content signal detection (definitions, statistics, attributions, expert quotes, named entities, questions, lists) |
+
+Simulates how each AI engine perceives the page: direct-definition blocks, statistics with sources, expert quotes, named entities and structured list/step patterns, then scores GEO readiness per engine.
+
+#### Module 03 — Semantic Structure & Schema
+![M03 Semantic Structure & Schema](screenshots/module-m03.png)
+
+| | |
+|---|---|
+| **What it analyzes** | Heading hierarchy, semantic HTML structure, content-type diversity, and schema coverage |
+| **Key outputs** | `hierarchical_outline`, `direct_answer_blocks`, `semantic_sections`, `schema_payloads`, `content_flow`, `heading_hierarchy_score`, `heading_hierarchy_tier`, `content_type_diversity_score`, `semantic_depth_score`, `schema_coverage_analysis`, `structure_issues`, `recommended_schemas`, `coverage_score`, `coverage_tier` |
+| **Live data** | Page structure analysis (H1/H2s, word counts, detected schemas) |
+
+Validates the semantic skeleton of the page — entity presence in headings, section depth, schema coverage — and recommends the exact schema types to add for each section.
+
+#### Module 04 — E-E-A-T Gap Profiler
+![M04 E-E-A-T Gap Profiler](screenshots/module-m04.png)
+
+| | |
+|---|---|
+| **What it analyzes** | Experience, Expertise, Authoritativeness, and Trustworthiness signals plus information-gain gaps vs competitors |
+| **Key outputs** | `eeat_scores`, `eeat_tier`, `signal_counts`, `weakest_signal`, `strongest_signal`, `eeat_issues`, `consensus_detection`, `consensus_score`, `information_gain_analysis`, `gap_priority_matrix`, `content_differentiation_score`, `unique_value_identification`, `high_priority_gaps`, `unique_opportunities` |
+| **Live data** | URL trust indicators, consensus keyphrase analysis |
+
+Profiles which E-E-A-T pillar is weakest, detects missing statistics, expert perspectives, use-cases, comparisons and future insights, and ranks the information-gain opportunities to outrank competitors.
+
+#### Module 05 — Internal Link & Cannibalization
+![M05 Internal Link & Cannibalization](screenshots/module-m05.png)
+
+| | |
+|---|---|
+| **What it analyzes** | Keyword cannibalization risk, internal-link graph, page authority, and link health |
+| **Key outputs** | `cannibalization_detection`, `link_plan`, `internal_link_graph`, `page_authority_assessment`, `fresh_content_strategy`, `defense_directives`, `link_density_per_100_words`, `link_quality_score`, `link_quality_tier`, `anchor_text_analysis`, `link_health_verification`, `link_issues`, `equity_distribution` |
+| **Live data** | Live link reachability checks (`urls_checked`, `reachable_200`, `broken_or_redirected`), external TLD distribution (gov/edu signals) |
+
+Flags cannibalized queries, builds the target internal-link architecture, scores link equity distribution, and verifies every link is live.
+
+#### Module 06 — Fluff & Cliche Decoder
+![M06 Fluff & Cliche Decoder](screenshots/module-m06.png)
+
+| | |
+|---|---|
+| **What it analyzes** | Filler content, clichés, AI patterns, passive voice, burstiness and readability depth |
+| **Key outputs** | `overall_quality_score`, `content_quality_tier`, `total_fluff_issues`, `issue_density_per_100_words`, `passive_voice_count`, `weak_intensifiers_count`, `hedge_words_count`, `empty_phrases_count`, `cliche_phrase_count`, `filler_transitions_count`, `vague_quantifiers_count`, `lexical_diversity`, `sentence_quality`, `trope_analysis`, `fluff_removal_priority`, `rewrite_recommendations` |
+| **Live data** | Real text statistics from the analyzed content |
+
+Quantifies fluff density, flags AI-sounding tropes, and gives a prioritized rewrite list so the content reads human and authoritative.
+
+#### Module 07 — Citation & Source Verifier
+![M07 Citation & Source Verifier](screenshots/module-m07.png)
+
+| | |
+|---|---|
+| **What it analyzes** | Claims, statistics, source credibility, and hallucination risk |
+| **Key outputs** | `claims_extracted`, `statistics_extracted`, `sources_identified`, `fact_check_results`, `source_quality_assessment`, `hallucination_risk_assessment`, `stat_source_coverage_rate`, `claim_source_coverage_rate`, `high_authority_sources`, `hallucination_risk_score`, `verification_summary`, `citation_optimization` |
+| **Live data** | Live URL verification (`live_check_performed`, `urls_checked`, `reachable_count`) |
+
+Extracts every statistic and factual claim, checks whether each has a live, high-authority source, and computes a hallucination-risk score for AI-engine citation safety.
+
+#### Module 08 — Multimodal Asset Blueprint
+![M08 Multimodal Asset Blueprint](screenshots/module-m08.png)
+
+| | |
+|---|---|
+| **What it analyzes** | The visual/data-asset plan needed to win the query — images, charts, videos, tables, infographics, calculators |
+| **Key outputs** | `data_points_identified`, `chart_specifications`, `calculator_specifications`, `image_specifications`, `video_specifications`, `table_specifications`, `infographic_specifications`, `alt_text_pipeline`, `asset_deployment_plan`, `total_assets_recommended`, `implementation_priority` |
+| **Live data** | Actual image audit (count, alt text, ratio vs benchmark) |
+
+Builds a complete asset production plan with exact specifications (chart types, calculators, infographic layouts) and an alt-text pipeline for accessibility + SEO.
+
+#### Module 09 — GEO Tracker
+![M09 GEO Tracker](screenshots/module-m09.png)
+
+| | |
+|---|---|
+| **What it analyzes** | Generative Engine tracking — live SERP snapshot + monitoring/alert framework for AI visibility |
+| **Key outputs** | `live_serp_snapshot` (`queries_monitored`, `captured_at`, `live_capture_success`), `tracking_configuration`, `monitoring_dashboard`, `alert_system`, `reporting_framework`, `readiness_score`, `url_geo_analysis`, `estimated_ai_citation_potential`, `geo_recommendations` |
+| **Live data** | Live SERP capture for the monitored queries |
+
+Takes a live snapshot of the queries being monitored, scores citation-readiness factors, and configures the ongoing tracking, dashboards and alerts.
+
+#### Module 10 — CSR Simulator
+![M10 CSR Simulator](screenshots/module-m10.png)
+
+| | |
+|---|---|
+| **What it analyzes** | Client-Side Rendering impact on crawlers, content availability, and Core Web Vitals |
+| **Key outputs** | `rendering_analysis`, `content_availability`, `core_web_vitals_impact` (`estimated_lcp_risk`, `estimated_cls_risk`, `estimated_inp_risk`), `js_dependencies`, `crawlability_assessment`, `prerender_readiness`, `dom_analysis`, `critical_issues`, `fix_recommendations` |
+| **Live data** | Page content-availability checks (title/meta/H1/H2/text/schema/links/images present) |
+
+Simulates how Googlebot, Bingbot, GPTBot and PerplexityBot see the page, estimating rendering risk and CWV impact with concrete prerender fixes.
+
+#### Module 11 — RAG Tester
+![M11 RAG Tester](screenshots/module-m11.png)
+
+| | |
+|---|---|
+| **What it analyzes** | Retrieval-Augmented Generation compatibility — chunking, query alignment, standalone context, embedding readiness |
+| **Key outputs** | `overall_rag_score`, `chunk_analysis` (`chunk_count`, `avg_chunk_words`, `optimal_chunk_size`, `chunks_in_optimal_range`), `query_alignment` (`alignment_scores`, `alignment_distribution`), `standalone_context_test` (`standalone_ready_count`), `embedding_readiness`, `retrieval_simulation`, `optimization_report` |
+| **Live data** | Actual content chunking + heading structure analysis |
+
+Chunks the real content, measures whether every chunk stands alone and answers its query, and scores how retrievable and citable the page is inside AI knowledge bases.
+
+#### Module 12 — Brand Compliance Engine
+![M12 Brand Compliance Engine](screenshots/module-m12.png)
+
+| | |
+|---|---|
+| **What it analyzes** | Regulated claims, trademark enforcement, brand voice, disclaimers, and legal risk |
+| **Key outputs** | `compliance_score`, `compliance_tier`, `critical_violations`, `regulated_claims_scan`, `trademark_enforcement`, `anti_trope_compliance`, `disclaimer_injection`, `legal_risk_assessment`, `brand_style_enforcement`, `brand_voice_analysis`, `terminology_consistency`, `violations_by_category` |
+| **Live data** | Page language/voice analysis (formal/casual/technical/jargon/action/hedging/assertive) |
+
+Scans for absolute, financial, compliance, performance and testimonial claims, enforces trademark/trope rules, and injects the exact disclaimers needed to de-risk the page.
+
+#### Module 13 — Schema Payload Generator
+![M13 Schema Payload Generator](screenshots/module-m13.png)
+
+| | |
+|---|---|
+| **What it analyzes** | Generates complete, validated JSON-LD payloads for every schema the page needs |
+| **Key outputs** | `article`, `faq`, `howto`, `product`, `author`, `publisher`, `breadcrumb`, `itemlist`, `video`, `organization` payloads, `nested_entity_schema`, `validation_results`, `search_engine_coverage`, `implementation_guide` |
+| **Live data** | Page signals for schema suitability (title, meta, H1, H2s, FAQ content, images) |
+
+Produces copy-ready JSON-LD for 10+ schema types, validates each one, and maps which rich-result types each engine supports.
+
+#### Module 14 — Intent & Bounce Predictor
+![M14 Intent & Bounce Predictor](screenshots/module-m14.png)
+
+| | |
+|---|---|
+| **What it analyzes** | User-intent detection, bounce-risk prediction, above-the-fold layout, scanability and engagement |
+| **Key outputs** | `overall_bounce_risk_score`, `user_intent_detection`, `intent_alignment`, `above_fold_analysis`, `readability_alignment`, `scanability_index`, `engagement_score`, `bounce_risk_prediction`, `content_depth_analysis`, `user_journey_alignment`, `competitor_bounce_comparison` |
+| **Live data** | Content depth, reading time, estimated dwell time, engagement signals |
+
+Classifies searcher intent (informational → transactional), predicts bounce risk, and tells you exactly what to change above the fold to hold attention.
+
+#### Module 15 — Content Decay Engine
+![M15 Content Decay Engine](screenshots/module-m15.png)
+
+| | |
+|---|---|
+| **What it analyzes** | Content freshness, decay indicators, and refresh strategy using real archive history |
+| **Key outputs** | `overall_health_score`, `computed_freshness_score`, `freshness_tier`, `decay_indicators`, `stale_signal_count`, `refresh_brief`, `wayback_archive_analysis`, `decay_prediction`, `gsc_impairments`, `competitor_monitoring`, `recovery_strategy`, `temporal_signal_strength` |
+| **Live data** | Wayback Machine CDX API snapshots (retries + backoff), date mentions, year references |
+
+Detects outdated data sources and year references, computes a freshness score, and produces a section-by-section refresh brief with estimated effort.
+
+#### Module 16 — CDN Edge Previewer
+![M16 CDN Edge Previewer](screenshots/module-m16.png)
+
+| | |
+|---|---|
+| **What it analyzes** | CDN provider, edge-worker code, server headers, pre-rendering and deployment |
+| **Key outputs** | `cdn_provider`, `edge_worker_snippet` (`worker_code`, `testing_steps`), `server_header_inspection`, `prerender_simulation`, `cdn_configuration`, `deployment_guide`, `security_headers_audit`, `performance_optimization`, `edge_computing_strategies`, `bot_serving_strategy` |
+| **Live data** | Real response headers (case-insensitive detection, honest `not_detected` fallback) |
+
+Inspects the live server headers, detects the CDN (or honestly reports none), generates a ready-to-deploy edge worker, and previews pre-rendered HTML for bots vs users.
+
+#### Module 17 — A/B Testing Engine
+![M17 A/B Testing Engine](screenshots/module-m17.png)
+
+| | |
+|---|---|
+| **What it analyzes** | Statistically valid A/B test designs for title/heading/content experiments |
+| **Key outputs** | `test_design`, `variant_configurations`, `statistical_framework`, `sample_size_requirements` (`minimum_sample_size`, `confidence_level`, `test_duration_days`), `monitoring_setup`, `rollback_guards`, `implementation_checklist`, `test_priority_ranking` |
+| **Live data** | Real sample-size math computed from the actual formula |
+
+Designs the exact experiments to run, computing minimum sample sizes, durations and traffic splits, with monitoring and auto-rollback guardrails.
+
+#### Module 18 — Indexing Sentinel
+![M18 Indexing Sentinel](screenshots/module-m18.png)
+
+| | |
+|---|---|
+| **What it analyzes** | Indexing readiness, robots.txt, sitemap, crawl budget and push-API configuration |
+| **Key outputs** | `indexing_readiness_score`, `indexing_readiness_tier`, `indexing_checks`, `total_checks_passed/failed/warning`, `robots_txt_analysis` (`allowed`, `status`, `robots_url`), `sitemap_analysis`, `page_status_check`, `crawl_budget_assessment`, `api_push_configuration`, `blocking_issues`, `warnings` |
+| **Live data** | Live robots.txt fetch, HTTP status check, sitemap detection |
+
+Checks whether search and AI bots are actually allowed to crawl the page, verifies the sitemap, and returns a ready-to-push IndexNow/API payload.
+
+#### Module 19 — Localization Sync
+![M19 Localization Sync](screenshots/module-m19.png)
+
+| | |
+|---|---|
+| **What it analyzes** | Locale targeting, hreflang, content-language detection, currency/date/measurement signals, translation priorities |
+| **Key outputs** | `hreflang_analysis` (`hreflang_tags`, `locales_covered`), `locale_targeting_assessment` (`detected_content_language`, `localization_score`, `localization_tier`), `entity_mapping`, `translation_priorities`, `international_seo_configuration`, `localization_actions` |
+| **Live data** | Page locale indicators, language codes, currency/date/measurement detection |
+
+Detects which locale the page is actually speaking, builds the correct hreflang tag set, and prioritizes which regions to localize first.
+
+#### Module 20 — Digital PR Engine
+![M20 Digital PR Engine](screenshots/module-m20.png)
+
+| | |
+|---|---|
+| **What it analyzes** | PR opportunities, knowledge-graph alignment, author trust, authority signals, and outreach targets |
+| **Key outputs** | `pr_opportunities`, `pr_angles`, `total_pr_opportunities`, `brand_mention_opportunities`, `authority_linking_strategy`, `pitch_templates`, `pr_readiness_score`, `pr_readiness_tier`, `knowledge_graph_alignment` (`wikidata_lookup`, `sameAs_schema`), `entity_authority_score`, `author_trust_verification`, `live_outlets_covering_topic` |
+| **Live data** | Live outlet discovery covering the topic, Wikidata/KG lookup |
+
+Finds the media outlets actively covering the topic, generates ready-to-send pitch angles, verifies the author's trust signals, and aligns the entity with the Knowledge Graph.
+
+#### Module 21 — DOM Inspector
+![M21 DOM Inspector](screenshots/module-m21.png)
+
+| | |
+|---|---|
+| **What it analyzes** | DOM structure, resources, layout stability, interactive elements, and performance impact |
+| **Key outputs** | `dom_analysis` (`estimated_dom_elements`, `max_nesting_depth`, `dom_size_tier`), `resource_analysis`, `layout_analysis`, `interactive_elements`, `performance_impact` (`overall_performance_impact_score`, `core_web_vitals_risk`, `estimated_page_weight_kb`, `estimated_load_time_ms`), `optimization_recommendations`, `optimization_priorities` |
+| **Live data** | Image/script/resource estimates, lazy-loading + dimension audits |
+
+Estimates DOM size and nesting depth, flags CLS/lazy-loading risks, and outputs a prioritized optimization list for faster rendering.
+
 ---
 
 ## 🗂 The 5 Blueprint Outputs

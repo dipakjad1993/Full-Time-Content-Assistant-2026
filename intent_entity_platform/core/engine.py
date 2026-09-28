@@ -45,6 +45,7 @@ from ..modules.module_18_indexing_sentinel import IndexingLogSentinel
 from ..modules.module_19_localization_sync import LocalizationSyncEngine as LocalizationSync
 from ..modules.module_20_digital_pr import DigitalPREngine
 from ..modules.module_21_dom_inspector import DOMInspector
+from ..modules.module_22_llm_citation import LLMCitationTester
 
 
 # ---------------------------------------------------------------------------
@@ -109,6 +110,7 @@ class PlatformEngine:
             "M19": {"name": "Localization Sync", "class": LocalizationSync},
             "M20": {"name": "Digital PR Engine", "class": DigitalPREngine},
             "M21": {"name": "DOM Inspector", "class": DOMInspector},
+            "M22": {"name": "Live LLM Citation Tester", "class": LLMCitationTester},
         }
         self.output_pipeline = OutputPipeline()
 
@@ -353,6 +355,8 @@ class PlatformEngine:
                     m21_inputs = dict(inputs)
                     m21_inputs["html_content"] = html_content
                     r = inst.analyze(m21_inputs)
+                elif mid == "M22":
+                    r = inst.analyze(inputs)
                 else:
                     r = {"module": mid, "status": "not_implemented"}
                 return mid, _normalize_result(mid, info["name"], r), None
@@ -360,7 +364,7 @@ class PlatformEngine:
                 return mid, _normalize_result(mid, info["name"], {"module": mid, "error": f"Error in {mid}: {e}"}), f"Error in {mid}: {e}"
 
         _mids = ["M04","M05","M06","M07","M08","M09","M10","M11","M12","M13",
-                 "M14","M15","M16","M17","M18","M19","M20","M21"]
+                 "M14","M15","M16","M17","M18","M19","M20","M21","M22"]
         with ThreadPoolExecutor(max_workers=8) as _pool:
             _fut = { _pool.submit(_run_mid, m): m for m in _mids }
             for _f in as_completed(_fut):

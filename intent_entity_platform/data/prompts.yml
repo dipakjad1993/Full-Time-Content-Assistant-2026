@@ -1,0 +1,42 @@
+# Prompt Library per vertical (P1). Fixed prompt sets for longitudinal SOV tracking.
+# Budget split guides prompt depth: B2B SaaS 50/50, Ecom 70/30, Media 30/70, Local 70/20/10 (SEO/GEO/AEO effort).
+version: 1
+verticals:
+  b2b_saas:
+    budget: "50/50 SEO/GEO"
+    prompts:
+      - "What is {entity} and who is it best for?"
+      - "{entity} vs {competitor}: which should I choose?"
+      - "How much does {entity} cost?"
+      - "How do I implement {entity}? Steps?"
+      - "Is {entity} enterprise-ready? Security/compliance?"
+      - "What do users say about {entity}?"
+      - "Top alternatives to {entity} in 2026?"
+      - "Latest {entity} updates 2026?"
+  ecommerce:
+    budget: "70/30 SEO/GEO"
+    prompts:
+      - "Best {entity} for {audience}? Top picks?"
+      - "{entity} price comparison and deals?"
+      - "{entity} reviews: pros and cons?"
+      - "Where to buy {entity} online?"
+      - "Is {entity} worth it in 2026?"
+      - "{entity} vs competitors?"
+  media:
+    budget: "30/70 SEO/GEO"
+    prompts:
+      - "Explain {entity} simply with sources."
+      - "Latest news about {entity}?"
+      - "What are experts saying about {entity}?"
+      - "Timeline of {entity} events 2026?"
+      - "{entity} myths vs facts?"
+  local:
+    budget: "70/20/10 SEO/GEO/AEO"
+    prompts:
+      - "Best {entity} near me?"
+      - "{entity} {locale} opening hours and price?"
+      - "Reviews for {entity} in {locale}?"
+      - "How to book {entity}?"
+engines: [openai, anthropic, gemini, perplexity]
+cadence: nightly
+history_kind: m22

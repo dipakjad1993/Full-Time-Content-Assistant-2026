@@ -1,0 +1,67 @@
+openapi: 3.0.3
+info:
+  title: Intent Entity Platform API
+  version: 3.0.0-enterprise
+  description: 22-module SEO+AEO+GEO analyzer. Live measurements labeled live_measurement; estimates labeled heuristic/cited_research.
+servers:
+  - url: http://127.0.0.1:5000
+paths:
+  /api/health:
+    get:
+      summary: Health + version + provider
+      responses:
+        '200': {description: ok}
+  /api/analyze:
+    post:
+      summary: Run M01-M22 analysis (manual inputs)
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {type: object}
+      responses:
+        '200': {description: blueprint + module_results}
+  /api/analyze-url:
+    post:
+      summary: Fetch URL (SSRF-guarded) then analyze
+      responses:
+        '200': {description: analysis with _url_data}
+  /api/score:
+    post: {summary: Dual SEO+GEO content score, responses: {'200': {description: scores}}}
+  /api/brief:
+    post: {summary: SERP-driven brief, responses: {'200': {description: brief}}}
+  /api/gsc_quick_wins:
+    post: {summary: GSC CSV quick wins, responses: {'200': {description: wins}}}
+  /api/gsc_oauth_status:
+    get: {summary: GSC OAuth capability probe, responses: {'200': {description: status}}}
+  /api/pagespeed:
+    post: {summary: CrUX + PSI vitals (NOT_MEASURED without key), responses: {'200': {description: vitals}}}
+  /api/ai_crawl_audit:
+    post: {summary: llms.txt + AI-bot robots audit, responses: {'200': {description: audit}}}
+  /api/extractability:
+    post: {summary: 40-60w answer-block validator, responses: {'200': {description: scores}}}
+  /api/offsite_authority:
+    post: {summary: Wikipedia + mention graph, responses: {'200': {description: graph}}}
+  /api/multimodal_audit:
+    post: {summary: Video/alt/WebP audit, responses: {'200': {description: audit}}}
+  /api/llm_test:
+    post: {summary: M22 live LLM citation run (cost-guarded), responses: {'200': {description: run}}}
+  /api/llm_history:
+    get: {summary: Longitudinal SOV history, responses: {'200': {description: history}}}
+  /api/tracker_history:
+    get: {summary: M09 snapshot history, responses: {'200': {description: history}}}
+  /api/action_center:
+    post: {summary: Tasks + CSV/Jira/Linear export, responses: {'200': {description: tasks}}}
+  /api/share:
+    post: {summary: Versioned share link (SQLite), responses: {'200': {description: link}}}
+  /api/download_pdf:
+    post: {summary: PDF (narrative_only=1 slims appendix), responses: {'200': {description: pdf}}}
+  /api/auth/status:
+    get: {summary: Auth mode + workspaces, responses: {'200': {description: status}}}
+  /api/docs:
+    get: {summary: Swagger-style endpoint index, responses: {'200': {description: index}}}
+  /api/mcp:
+    post:
+      summary: Model Context Protocol endpoint (tools/list, tools/call)
+      responses:
+        '200': {description: mcp result}

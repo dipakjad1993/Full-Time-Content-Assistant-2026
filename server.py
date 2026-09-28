@@ -22,7 +22,7 @@ from intent_entity_platform.utils.gsc_quickwins import parse_gsc_csv, quick_wins
 from intent_entity_platform.utils.brief_generator import generate_brief
 
 APP_DEBUG = os.environ.get("APP_DEBUG", "false").lower() in ("1","true","yes")
-APP_VERSION = "2.1.0-enterprise"
+APP_VERSION = "3.0.0-enterprise"
 MAX_JSON_BYTES = 6 * 1024 * 1024
 
 app = None  # created below (single Flask instance; see app=Flask(__name__))
@@ -109,7 +109,7 @@ _EMAIL_RE=re.compile(r'^[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}$')
 # ---------------------------------------------------------------------------
 _PROGRESS_STORE={}
 _PROGRESS_TTL=900   # 15 minutes; stale entries are garbage-collected
-_TOTAL_MODULES=21
+_TOTAL_MODULES=22
 
 def _progress_gc():
     """Drop progress entries older than the TTL (bounded memory)."""
@@ -179,7 +179,12 @@ def _make_progress_recorder(analysis_id):
             rec["current_module"]=None
             rec["current_module_name"]=""
             rec["phase"]="Complete"
-            rec["phase_label"]="All 21 modules completed"
+            rec["phase_label"]="All 22 modules completed"
+        try:
+            from intent_entity_platform.utils import persistence as _pstp
+            _pstp.progress_put(analysis_id, rec)
+        except Exception:
+            pass
     return _rec
 
 def _mark_progress_done(analysis_id, errors=None):
@@ -191,10 +196,15 @@ def _mark_progress_done(analysis_id, errors=None):
     rec["current_module"]=None
     rec["current_module_name"]=""
     rec["phase"]="Complete"
-    rec["phase_label"]="All 21 modules completed"
+    rec["phase_label"]="All 22 modules completed"
     if errors:
         rec["errors"]=list(errors)
     rec["updated_at"]=time.time()
+    try:
+        from intent_entity_platform.utils import persistence as _pstq
+        _pstq.progress_put(analysis_id, rec)
+    except Exception:
+        pass
 
 def _send_email(to_addr,subject,html_body,attach_name=None,attach_bytes=None):
     host=_mail_setting('smtp_host','SMTP_HOST','')
@@ -606,8 +616,12 @@ def _bench_target(b):
     except Exception:
         return 'N/A'
 
-def build_report_pdf(results):
+def build_report_pdf(results, narrative_only=False):
     if not results: results={}
+    try:
+        narrative_only = bool(results.pop('_narrative_only', narrative_only))
+    except Exception:
+        pass
     buf=io.BytesIO()
     styles=_make_styles()
     doc=_TocDocTemplate(buf,pagesize=A4,leftMargin=16*mm,rightMargin=16*mm,topMargin=18*mm,bottomMargin=32*mm,
@@ -697,12 +711,12 @@ def build_report_pdf(results):
         story.append(PageBreak())
 
     # ---- 7. Module Results ----
-    story.append(Paragraph('7. Module Results (M01 - M21)',styles['TOCHeading1']))
+    story.append(Paragraph('7. Module Results (M01 - M22)',styles['TOCHeading1']))
     story.append(HRFlowable(width='100%',thickness=0.8,color=_BRAND,spaceBefore=1,spaceAfter=8))
-    _section_banner(story,styles,'7','Module Results (M01 - M21)')
+    _section_banner(story,styles,'7','Module Results (M01 - M22)')
     story.append(Spacer(1,6))
     first_module=True
-    for i in range(1,22):
+    for i in range(1,23):
         k='M%02d'%i
         mr=module_results.get(k)
         if not mr: continue
@@ -759,22 +773,28 @@ def build_report_pdf(results):
                 story.append(Paragraph('Live Verified Statistics (real, sourced)',styles['h3']))
                 _add_table(story,[{'#':i+1,'Statistic':s.get('stat',''),'Source':s.get('source_title','') or s.get('source_url','')} for i,s in enumerate(lvs['statistics'][:10])],styles,usable_width)
 
-    # ---- 8. Appendix ----
-    story.append(Paragraph('8. Full Data Appendix',styles['TOCHeading1']))
-    story.append(HRFlowable(width='100%',thickness=0.8,color=_BRAND,spaceBefore=1,spaceAfter=8))
-    _section_banner(story,styles,'8','Full Data Appendix')
-    story.append(Paragraph('Complete raw data used to generate this report (programmatic use).',styles['body']))
-    story.append(Spacer(1,6))
-    export={k:v for k,v in results.items() if k!='_url_data'}
-    if url_data:
-        export['_url_data']={k:v for k,v in url_data.items() if k not in ('raw_html','page_text')}
-    try:
-        raw=json.dumps(export,ensure_ascii=False,indent=1,default=str)
-    except Exception:
-        raw=str(export)
-    if len(raw)>200000:
-        raw=raw[:200000]+'\n... [truncated]'
-    _add_raw_json(story,styles,raw)
+    # ---- 8. Appendix (skipped in narrative-only slim mode) ----
+    if narrative_only:
+        story.append(Paragraph('8. Full Data Appendix (slim mode)',styles['TOCHeading1']))
+        story.append(HRFlowable(width='100%',thickness=0.8,color=_BRAND,spaceBefore=1,spaceAfter=8))
+        story.append(Paragraph('Slim narrative PDF: full JSON available via /api/download_json or the Raw JSON tab (downloadable artifact).',styles['body']))
+        story.append(Spacer(1,6))
+    else:
+        story.append(Paragraph('8. Full Data Appendix',styles['TOCHeading1']))
+        story.append(HRFlowable(width='100%',thickness=0.8,color=_BRAND,spaceBefore=1,spaceAfter=8))
+        _section_banner(story,styles,'8','Full Data Appendix')
+        story.append(Paragraph('Complete raw data used to generate this report (programmatic use). For large reports prefer /api/download_json.',styles['body']))
+        story.append(Spacer(1,6))
+        export={k:v for k,v in results.items() if k!='_url_data'}
+        if url_data:
+            export['_url_data']={k:v for k,v in url_data.items() if k not in ('raw_html','page_text')}
+        try:
+            raw=json.dumps(export,ensure_ascii=False,indent=1,default=str)
+        except Exception:
+            raw=str(export)
+        if len(raw)>200000:
+            raw=raw[:200000]+'\n... [truncated — download full JSON via /api/download_json]'
+        _add_raw_json(story,styles,raw)
     doc.multiBuild(story,onFirstPage=_first_page,onLaterPages=_pdf_footer)
     buf.seek(0)
     return buf.read()
@@ -785,7 +805,7 @@ app=Flask(__name__)
 def add_cors_headers(response):
     response.headers['Access-Control-Allow-Origin'] = '*'
     response.headers['Access-Control-Allow-Methods'] = 'GET, POST, OPTIONS'
-    response.headers['Access-Control-Allow-Headers'] = 'Content-Type, Accept'
+    response.headers['Access-Control-Allow-Headers'] = 'Content-Type, Accept, X-API-Key'
     response.headers['Access-Control-Max-Age'] = '3600'
     try:
         return _apply_security_headers(response)
@@ -812,6 +832,12 @@ def api_progress(analysis_id):
     if request.method == 'OPTIONS':
         return jsonify({'ok': True})
     rec=_PROGRESS_STORE.get(analysis_id)
+    if not rec:
+        try:
+            from intent_entity_platform.utils import persistence as _pstg
+            rec = _pstg.progress_get(analysis_id)
+        except Exception:
+            rec = None
     if not rec:
         return jsonify({'ok':False,'error':'Unknown or expired analysis session. Please run a new analysis.'}),404
     # Return a copy so callers can't mutate the live store
@@ -880,6 +906,15 @@ def api_analyze():
         _mark_progress_done(analysis_id, results.get('errors',{}))
         results['analysis_id']=analysis_id
         results['server_version']=APP_VERSION
+        try:
+            from intent_entity_platform.utils import persistence as _psth
+            _key = str(data.get('entity') or data.get('seed') or '')[:240].lower() or 'manual'
+            _psth.history_add("tracker_snapshot", _key, {
+                "analysis_id": analysis_id,
+                "modules": len((results.get('module_results') or {})),
+                "errors": len((results.get('errors') or {}))})
+        except Exception:
+            pass
         return jsonify(results)
     except Exception as e:
         if 'analysis_id' in locals():
@@ -1057,8 +1092,9 @@ def api_download_pdf():
     results=data.get('report') or {}
     if isinstance(results, dict) and len(json.dumps(results, default=str)) > 5_000_000:
         return jsonify({"error": "Report payload too large (max ~5MB)"}), 413
+    slim = bool(data.get('narrative_only') or request.args.get('narrative_only') == '1')
     try:
-        pdf=build_report_pdf(results)
+        pdf=build_report_pdf(results, narrative_only=slim)
     except Exception as e:
         return _safe_error("Could not generate the PDF report", e, 500)
     ts=datetime.datetime.now().strftime('%Y%m%d_%H%M%S')
@@ -1158,12 +1194,25 @@ def api_share():
             oldest = sorted(_REPORT_STORE.items(), key=lambda kv: kv[1]["created"])[:50]
             for k, _ in oldest:
                 _REPORT_STORE.pop(k, None)
+    try:
+        from intent_entity_platform.utils import persistence as _pst2
+        _pst2.share_put(sid, report, str(data.get("label", ""))[:120])
+    except Exception:
+        pass
     return jsonify({"ok": True, "share_id": sid, "share_url": f"/api/share/{sid}"})
 
 @app.route('/api/share/<sid>', methods=['GET'])
 def api_share_get(sid):
     rec = _REPORT_STORE.get(str(sid)[:32])
     if not rec:
+        try:
+            from intent_entity_platform.utils import persistence as _pst3
+            srec = _pst3.share_get(str(sid)[:32])
+            if srec:
+                return jsonify({"ok": True, "label": srec.get("label", ""),
+                                "report": srec.get("report")})
+        except Exception:
+            pass
         return jsonify({"error": "Unknown or expired share link"}), 404
     return jsonify({"ok": True, "label": rec.get("label", ""), "report": rec.get("report")})
 
@@ -1172,7 +1221,291 @@ def api_health():
     import intent_entity_platform as _pkg
     return jsonify({"ok": True, "version": APP_VERSION, "debug": APP_DEBUG,
                     "serp_provider": os.environ.get("SERP_PROVIDER", "ddg_fallback"),
+                    "modules": 22,
                     "time": datetime.datetime.now().isoformat()})
+
+# ---------------------------------------------------------------------------
+# v3.0.0-enterprise routes: persistence-backed shares, slim PDF/JSON, P0/P1 APIs
+# In-memory _OTP/_PROGRESS/_REPORT stores kept for backward compat; every
+# write is mirrored to SQLite (utils.persistence) so multi-worker prod works.
+# ---------------------------------------------------------------------------
+try:
+    from intent_entity_platform.utils import persistence as _pst
+    from intent_entity_platform.utils import auth as _auth
+    from intent_entity_platform.utils.ai_crawler_audit import audit_ai_crawlers
+    from intent_entity_platform.utils.pagespeed import full_vitals
+    from intent_entity_platform.utils.gsc_oauth import oauth_status as _gsc_status
+    from intent_entity_platform.utils.extractability import validate_extractability
+    from intent_entity_platform.utils.offsite_authority import authority_graph
+    from intent_entity_platform.utils.multimodal_video import audit_multimodal
+    from intent_entity_platform.utils.action_center import (
+        build_tasks as _build_tasks, to_csv as _tasks_csv,
+        to_issue_tracker as _tasks_tracker, ga4_attribution_stub as _ga4)
+    from intent_entity_platform.modules.module_22_llm_citation import LLMCitationTester
+    _ENT_OK = True
+except Exception as _ent_e:
+    _ENT_OK = False
+    _ENT_ERR = str(_ent_e)[:200]
+
+def _ent_guard():
+    if not _ENT_OK:
+        return jsonify({"error": "Enterprise extensions failed to load"}), 500
+    return None
+
+@app.route('/api/download_json', methods=['POST', 'OPTIONS'])
+def api_download_json():
+    if request.method == 'OPTIONS':
+        return jsonify({'ok': True})
+    data = request.get_json(silent=True) or {}
+    report = data.get('report') or {}
+    if not isinstance(report, dict) or not report:
+        return jsonify({"error": "report payload required"}), 400
+    slim = dict(report)
+    ud = slim.get('_url_data')
+    if isinstance(ud, dict):
+        slim['_url_data'] = {k: v for k, v in ud.items() if k not in ('raw_html', 'page_text')}
+    ts = datetime.datetime.now().strftime('%Y%m%d_%H%M%S')
+    return Response(json.dumps(slim, ensure_ascii=False, indent=1, default=str),
+                    mimetype='application/json',
+                    headers={'Content-Disposition': 'attachment; filename=content_report_%s.json' % ts})
+
+@app.route('/api/gsc_oauth_status', methods=['GET'])
+def api_gsc_oauth_status():
+    err = _ent_guard()
+    if err: return err
+    return jsonify({"ok": True, **_gsc_status()})
+
+@app.route('/api/pagespeed', methods=['POST', 'OPTIONS'])
+def api_pagespeed():
+    if request.method == 'OPTIONS':
+        return jsonify({'ok': True})
+    err = _ent_guard()
+    if err: return err
+    ok_rl, msg_rl = check_rate_limit(_client_ip(), "pagespeed", 30, 3600)
+    if not ok_rl:
+        return jsonify({"error": msg_rl}), 429
+    data = request.get_json(silent=True) or {}
+    url = str(data.get('url', ''))[:2048]
+    if not url:
+        return jsonify({"error": "url required"}), 400
+    allowed, reason = is_url_allowed(url)
+    if not allowed:
+        return jsonify({"error": "URL blocked by SSRF policy: %s" % reason}), 400
+    try:
+        return jsonify({"ok": True, **full_vitals(url, str(data.get('strategy', 'mobile'))[:10])})
+    except Exception as e:
+        return _safe_error("PageSpeed lookup failed", e, 500)
+
+@app.route('/api/ai_crawl_audit', methods=['POST', 'OPTIONS'])
+def api_ai_crawl_audit():
+    if request.method == 'OPTIONS':
+        return jsonify({'ok': True})
+    err = _ent_guard()
+    if err: return err
+    data = request.get_json(silent=True) or {}
+    try:
+        return jsonify({"ok": True, **audit_ai_crawlers(
+            str(data.get('url', ''))[:2048],
+            str(data.get('robots_text', ''))[:100000],
+            str(data.get('html', ''))[:500000])})
+    except Exception as e:
+        return _safe_error("AI-crawler audit failed", e, 500)
+
+@app.route('/api/extractability', methods=['POST', 'OPTIONS'])
+def api_extractability():
+    if request.method == 'OPTIONS':
+        return jsonify({'ok': True})
+    err = _ent_guard()
+    if err: return err
+    data = request.get_json(silent=True) or {}
+    try:
+        return jsonify({"ok": True, **validate_extractability(
+            str(data.get('page_text', ''))[:200000],
+            str(data.get('h1', ''))[:300],
+            [str(h)[:300] for h in (data.get('h2s') or [])][:40],
+            str(data.get('html', ''))[:500000],
+            [str(s)[:60] for s in (data.get('schema_types') or [])][:20])})
+    except Exception as e:
+        return _safe_error("Extractability scoring failed", e, 500)
+
+@app.route('/api/offsite_authority', methods=['POST', 'OPTIONS'])
+def api_offsite_authority():
+    if request.method == 'OPTIONS':
+        return jsonify({'ok': True})
+    err = _ent_guard()
+    if err: return err
+    ok_rl, msg_rl = check_rate_limit(_client_ip(), "offsite", 30, 3600)
+    if not ok_rl:
+        return jsonify({"error": msg_rl}), 429
+    data = request.get_json(silent=True) or {}
+    try:
+        return jsonify({"ok": True, **authority_graph(
+            str(data.get('entity', ''))[:200],
+            str(data.get('seed', ''))[:200],
+            str(data.get('brand', ''))[:200])})
+    except Exception as e:
+        return _safe_error("Off-site authority scan failed", e, 500)
+
+@app.route('/api/multimodal_audit', methods=['POST', 'OPTIONS'])
+def api_multimodal_audit():
+    if request.method == 'OPTIONS':
+        return jsonify({'ok': True})
+    err = _ent_guard()
+    if err: return err
+    data = request.get_json(silent=True) or {}
+    try:
+        return jsonify({"ok": True, **audit_multimodal(
+            str(data.get('html', ''))[:500000],
+            str(data.get('page_text', ''))[:200000],
+            int(data.get('image_count', 0) or 0),
+            str(data.get('url', ''))[:2048])})
+    except Exception as e:
+        return _safe_error("Multimodal audit failed", e, 500)
+
+@app.route('/api/llm_test', methods=['POST', 'OPTIONS'])
+def api_llm_test():
+    if request.method == 'OPTIONS':
+        return jsonify({'ok': True})
+    err = _ent_guard()
+    if err: return err
+    ok_rl, msg_rl = check_rate_limit(_client_ip(), "llm_test", 10, 3600)
+    if not ok_rl:
+        return jsonify({"error": msg_rl}), 429
+    data = request.get_json(silent=True) or {}
+    entity = str(data.get('entity') or data.get('primary_entity') or '')[:200]
+    if not entity and not str(data.get('seed', '')):
+        return jsonify({"error": "entity (or seed) required"}), 400
+    try:
+        t = LLMCitationTester()
+        out = t.analyze({"primary_entity": entity,
+                          "seed_phrase": str(data.get('seed', ''))[:200],
+                          "brand": str(data.get('brand', ''))[:200],
+                          "funnel_stage": str(data.get('funnel', ''))[:40],
+                          "knowledge_floor": str(data.get('knowledge', ''))[:40],
+                          "m22_prompts": int(data.get('prompts', 10) or 10)})
+        return jsonify({"ok": True, **out})
+    except Exception as e:
+        return _safe_error("LLM citation test failed", e, 500)
+
+@app.route('/api/llm_history', methods=['GET'])
+def api_llm_history():
+    err = _ent_guard()
+    if err: return err
+    key = str(request.args.get('key', ''))[:240].lower()
+    if not key:
+        return jsonify({"error": "key (entity) required"}), 400
+    rows = _pst.history_list("m22", key, int(request.args.get('limit', 90) or 90))
+    sov = [r.get('share_of_voice_pct') for r in rows if isinstance(r.get('share_of_voice_pct'), (int, float))]
+    return jsonify({"ok": True, "key": key, "runs": len(rows), "history": rows,
+                    "sov_trend": sov,
+                    "sov_delta": round(sov[-1] - sov[0], 1) if len(sov) >= 2 else 0.0,
+                    "method_note": "SQLite-persisted M22 runs (live vs honest_mock labeled per run)."})
+
+@app.route('/api/tracker_history', methods=['GET'])
+def api_tracker_history():
+    err = _ent_guard()
+    if err: return err
+    key = str(request.args.get('key', ''))[:240].lower()
+    if not key:
+        return jsonify({"error": "key (entity) required"}), 400
+    rows = _pst.history_list("tracker_snapshot", key, int(request.args.get('limit', 90) or 90))
+    return jsonify({"ok": True, "key": key, "snapshots": len(rows), "history": rows})
+
+@app.route('/api/tracker_record', methods=['POST', 'OPTIONS'])
+def api_tracker_record():
+    if request.method == 'OPTIONS':
+        return jsonify({'ok': True})
+    err = _ent_guard()
+    if err: return err
+    data = request.get_json(silent=True) or {}
+    key = str(data.get('entity') or data.get('key') or '')[:240].lower()
+    if not key:
+        return jsonify({"error": "entity required"}), 400
+    rid = _pst.history_add("tracker_snapshot", key, {
+        "entity": data.get('entity'), "snapshot": data.get('snapshot', {}),
+        "source": "api_tracker_record"})
+    return jsonify({"ok": True, "id": rid})
+
+@app.route('/api/action_center', methods=['POST', 'OPTIONS'])
+def api_action_center():
+    if request.method == 'OPTIONS':
+        return jsonify({'ok': True})
+    err = _ent_guard()
+    if err: return err
+    data = request.get_json(silent=True) or {}
+    mr = data.get('module_results') or (data.get('report') or {}).get('module_results') or {}
+    if not isinstance(mr, dict) or not mr:
+        return jsonify({"error": "module_results (or report.module_results) required"}), 400
+    fmt = str(data.get('format', 'json'))[:10].lower()
+    tasks = _build_tasks(mr, int(data.get('max_tasks', 40) or 40))
+    if fmt == 'csv':
+        return Response(_tasks_csv(tasks), mimetype='text/csv',
+                        headers={'Content-Disposition': 'attachment; filename=action_center.csv'})
+    if fmt in ('jira', 'linear'):
+        return jsonify({"ok": True, "system": fmt, "count": len(tasks),
+                        "issues": _tasks_tracker(tasks, fmt), "ga4": _ga4()})
+    return jsonify({"ok": True, "count": len(tasks), "tasks": tasks, "ga4": _ga4()})
+
+@app.route('/api/auth/status', methods=['GET'])
+def api_auth_status():
+    err = _ent_guard()
+    if err: return err
+    return jsonify({"ok": True, **_auth.auth_status()})
+
+@app.route('/api/serp_status', methods=['GET'])
+def api_serp_status():
+    provider = os.environ.get("SERP_PROVIDER", "ddg_fallback")
+    has_serper = bool(os.environ.get("SERPER_API_KEY"))
+    has_dfd = bool(os.environ.get("DATAFORSEO_LOGIN") and os.environ.get("DATAFORSEO_PASSWORD"))
+    effective = provider
+    if provider == "serper" and not has_serper:
+        effective = "ddg_fallback (SERPER_API_KEY missing)"
+    if provider == "dataforseo" and not has_dfd:
+        effective = "ddg_fallback (DATAFORSEO creds missing)"
+    return jsonify({"ok": True, "configured": provider, "effective": effective,
+                    "serper_key": "SET" if has_serper else "MISSING",
+                    "dataforseo": "SET" if has_dfd else "MISSING",
+                    "cost_guard": "$ per 1k queries is provider-billed; DDG fallback is free but brittle HTML scrape — Serper first-class when key set.",
+                    "cache": "SQLite 30-day (serp_cache.sqlite3 + platform.sqlite3 history)"})
+
+@app.route('/api/docs', methods=['GET'])
+def api_docs():
+    try:
+        spec = open(Path(__file__).parent / "openapi.yaml", encoding="utf-8").read()
+    except Exception:
+        spec = "openapi: 3.0.3\ninfo:\n  title: Intent Entity Platform API\n  version: 3.0.0-enterprise\n"
+    routes = sorted([str(r) for r in app.url_map.iter_rules()])
+    return jsonify({"ok": True, "version": APP_VERSION, "routes": routes,
+                    "openapi_path": "openapi.yaml", "openapi": spec[:20000]})
+
+@app.route('/api/mcp', methods=['POST', 'OPTIONS'])
+def api_mcp():
+    if request.method == 'OPTIONS':
+        return jsonify({'ok': True})
+    err = _ent_guard()
+    if err: return err
+    data = request.get_json(silent=True) or {}
+    method = str(data.get('method', '')) or str(data.get('jsonrpc_method', ''))
+    if method in ('tools/list', 'list_tools', ''):
+        return jsonify({"ok": True, "tools": [
+            {"name": "analyze", "description": "Run 22-module analysis", "input": {"seed": "string", "entity": "string"}},
+            {"name": "score", "description": "Dual SEO+GEO score", "input": {"draft": "string"}},
+            {"name": "brief", "description": "SERP-driven brief", "input": {"seed": "string", "entity": "string"}},
+            {"name": "llm_test", "description": "M22 citation test", "input": {"entity": "string"}},
+            {"name": "ai_crawl_audit", "description": "llms.txt + AI-bot audit", "input": {"url": "string"}},
+            {"name": "action_center", "description": "Tasks from results", "input": {"module_results": "object"}},
+        ]})
+    if method == 'tools/call':
+        name = str((data.get('params') or {}).get('name') or data.get('tool') or '')
+        args = (data.get('params') or {}).get('arguments') or data.get('args') or {}
+        if name == 'ai_crawl_audit':
+            return jsonify({"ok": True, "result": audit_ai_crawlers(str(args.get('url', '')))})
+        if name == 'llm_test':
+            t = LLMCitationTester()
+            return jsonify({"ok": True, "result": t.analyze(
+                {"primary_entity": str(args.get('entity', ''))})})
+        return jsonify({"error": "Unknown tool: %s" % name[:80]}), 400
+    return jsonify({"error": "Unsupported MCP method. Use tools/list or tools/call."}), 400
 
 INDEX_HTML=r"""<!DOCTYPE html>
 <html lang="en">

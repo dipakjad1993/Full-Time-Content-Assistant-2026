@@ -9,8 +9,8 @@
 [![Flask](https://img.shields.io/badge/Flask-3.0-000000?style=for-the-badge&logo=flask&logoColor=white)](https://flask.palletsprojects.com/)
 [![ReportLab](https://img.shields.io/badge/ReportLab-4.2-E1462C?style=for-the-badge&logo=adobe&logoColor=white)](https://www.reportlab.com/)
 [![SMTP](https://img.shields.io/badge/SMTP-OTP%20Verified-00897B?style=for-the-badge&logo=gmail&logoColor=white)](https://en.wikipedia.org/wiki/Simple_Mail_Transfer_Protocol)
-[![Version](https://img.shields.io/badge/Version-v2.1.0--enterprise-6d4ff0?style=for-the-badge)](https://github.com/dipakjad1993/Full-Time-Content-Assistant-2026)
-[![Tests](https://img.shields.io/badge/Tests-13%2F13%20pytest%20passing-059669?style=for-the-badge)](https://docs.pytest.org/)
+[![Version](https://img.shields.io/badge/Version-v3.0.0--enterprise-6d4ff0?style=for-the-badge)](https://github.com/dipakjad1993/Full-Time-Content-Assistant-2026)
+[![Tests](https://img.shields.io/badge/Tests-44%2F44%20pytest%20passing-059669?style=for-the-badge)](https://docs.pytest.org/)
 [![Platform](https://img.shields.io/badge/Platform-Windows%20%7C%20macOS%20%7C%20Linux-0078D6?style=for-the-badge&logo=windows&logoColor=white)](https://www.python.org/)
 [![License](https://img.shields.io/badge/License-MIT-green?style=for-the-badge)](LICENSE)
 [![GitHub Repo](https://img.shields.io/badge/GitHub-dipakjad1993%2FFull--Time--Content--Assistant--2026-181717?style=for-the-badge&logo=github&logoColor=white)](https://github.com/dipakjad1993/Full-Time-Content-Assistant-2026)
@@ -26,6 +26,18 @@
 </div>
 
 ---
+
+## 🆕 What's New in v3.0.0-enterprise (22 modules, SQLite persistence, live LLM tracking)
+
+| Area | What changed |
+|---|---|
+| Scale | M22 Live LLM Citation Tester (OpenAI/Anthropic/Gemini/Perplexity, honest_mock without keys, SOV + sentiment + transcripts in SQLite history); engine thread-pool now M04–M22; 44/44 pytest |
+| Persistence | SQLite-backed OTP / progress / shares / history / audit (`utils/persistence.py`, `PLATFORM_DB`) — multi-worker safe; in-memory stores kept as compat cache |
+| Measure | M18 AI-crawler completeness (9 bots retrieval-vs-training, live `llms.txt`+`ai.txt`, meta noai); `/api/pagespeed` (CrUX field + PSI lab, `NOT_MEASURED` without key); `/api/gsc_oauth_status` (OAuth probe, CSV stays primary) |
+| Moat | `/api/llm_test` + `/api/llm_history` + `prompts.yml` verticals + `scripts/nightly_tracker_cron.py`; `/api/offsite_authority` (Wikipedia/Wikidata + Reddit/Quora/YouTube/podcast + tier-1 likelihood); `/api/extractability` (40–60w bands, per-engine, Rufus A9 check); `/api/multimodal_audit` (YouTube/transcript/WebP/AVIF/alt); `/api/action_center` (tasks → CSV/Jira/Linear + GA4 stub) |
+| Platform | API keys + workspaces + audit (`/api/auth/status`, SSO-ready at proxy); `openapi.yaml` + `/api/docs` + `/api/mcp` (tools/list, tools/call); Serper-first `/api/serp_status` cost guard; slim PDF (`narrative_only=1`) + `/api/download_json` artifact |
+| Deploy | `Dockerfile` + `docker-compose.yml` + `wsgi.py` (gunicorn/waitress) + `.env.example` + `requirements.lock` + MIT `LICENSE`; SSRF fix for IPv4-mapped IPv6 (`::ffff:127.0.0.1` now blocked, verified) |
+| Honesty | Every new number carries `live_measurement` vs `heuristic` vs `cited_research` + `method_note`; no fake certainty anywhere |
 
 ## 🆕 What's New in v2.1.0-enterprise
 
@@ -187,7 +199,7 @@ Tools built for the last decade only optimize for ecosystem #1. Meanwhile, **Gen
 
 **Full Time Content Assistant 2026** collapses that entire workflow into a single, self-hosted web tool:
 
-- One input. **Twenty-one** specialized analyses. **Five** compiled blueprints. **One** report.
+- One input. **Twenty-two** specialized analyses. **Five** compiled blueprints. **One** report.
 - Real live data from the open web at the moment of analysis — never stale templates.
 - A polished PDF report you can download or email to a **verified** inbox.
 - Complete JSON export for programmatic pipelines.
@@ -238,7 +250,7 @@ Type a seed keyword and a primary entity (plus optional brand, locale, device, f
 Paste any published blog/article URL. The server:
 1. **Fetches** the page live over HTTP.
 2. **Parses** title, meta description, meta keywords, H1, H2s, body text, word count, link count, image count, and schema presence (JSON-LD).
-3. Runs the full **21-module analysis** against the extracted content.
+3. Runs the full **22-module analysis** against the extracted content.
 4. Adds a **URL Analysis banner** with the live page stats to the results.
 
 *See screenshot 14 — the URL banner is visible at the top of the results.*
@@ -622,7 +634,7 @@ The engine performs **real network requests** at analysis time:
 | Server response headers | Server technology + CDN provider detection (case-insensitive; honest `not_detected` fallback) | M16 |
 | Link reachability | Live health checks for citation/internal URLs | M05, M07 |
 
-All network calls include sensible timeouts, UA rotation, retries with backoff, and graceful fallbacks — a slow or blocking third-party service never hangs the whole analysis. M04–M21 execute in an 8-worker thread pool, so one slow source can't serialize the entire run.
+All network calls include sensible timeouts, UA rotation, retries with backoff, and graceful fallbacks — a slow or blocking third-party service never hangs the whole analysis. M04–M22 execute in an 8-worker thread pool, so one slow source can't serialize the entire run.
 
 ---
 
@@ -638,7 +650,7 @@ All network calls include sensible timeouts, UA rotation, retries with backoff, 
 | Email | Standard library `smtplib` / `email` (SMTP with STARTTLS) |
 | Front end | Vanilla JS + CSS (zero build step) — Google Sans (Pixel) font, dark/light themes |
 | HTML parsing | `html.parser` (no heavy dependencies) |
-| Tests | `pytest` (13 tests, fully mocked network) |
+| Tests | `pytest` (44 tests, fully mocked network) |
 
 ---
 
@@ -654,7 +666,7 @@ All network calls include sensible timeouts, UA rotation, retries with backoff, 
 ┌──────────────▼────────────────────────┐
 │        PlatformEngine                 │  core/engine.py
 │        run_analysis(InputFramework)   │
-│  M01→M02→M03 chain, then M04–M21 in   │
+│  M01→M02→M03 chain, then M04–M22 in   │
 │  ThreadPoolExecutor(8); every result  │
 │  normalized to the ModuleResult       │
 │  contract + heuristic labels          │
@@ -690,7 +702,7 @@ All network calls include sensible timeouts, UA rotation, retries with backoff, 
 **End-to-end flow:**
 1. Browser submits inputs (or a URL) to the Flask API (rate-limited, SSRF-guarded, size-capped).
 2. `PlatformEngine` builds a validated `InputFramework`.
-3. M01→M02→M03 run in sequence (real dependencies); **M04–M21 run in parallel** — many pulling **live web data** via the cached SERP-provider layer.
+3. M01→M02→M03 run in sequence (real dependencies); **M04–M22 run in parallel** — many pulling **live web data** via the cached SERP-provider layer.
 4. `OutputPipeline` compiles results into 5 blueprints + executive summary (derived from actual module health — no fabricated counts).
 5. Results return as JSON; the browser renders tabs, stat boxes, tables and issue highlighting (all interpolations escaped).
 6. The user can download the PDF (server renders via ReportLab), share via versioned `/api/share` links, generate a `/api/brief`, score drafts via `/api/score`, upload GSC CSVs via `/api/gsc_quick_wins`, or send the PDF through the OTP-verified email flow.
@@ -701,15 +713,26 @@ All network calls include sensible timeouts, UA rotation, retries with backoff, 
 
 ```
 Full-Time-Content-Assistant-2026/
-├── server.py                        # Flask app: UI, API, PDF builder, OTP + email, score/brief/GSC/share endpoints
-├── requirements.txt                 # Flask, ReportLab, Requests, pytest (+ gunicorn/waitress notes)
+├── server.py                        # Flask app: UI, API (22 modules + enterprise P0/P1), PDF builder, OTP + email
+├── requirements.txt                 # Flask, ReportLab, Requests, pytest, bs4/lxml, tldextract, sklearn/sentence-transformers
+├── requirements.lock                # Pinned enterprise versions (regenerate via `pip freeze`)
+├── wsgi.py                          # Prod entry (gunicorn linux / waitress windows)
+├── Dockerfile                       # Prod image (gunicorn, 2 workers x 8 threads)
+├── docker-compose.yml               # One-command prod run (SQLite volume persisted)
+├── .dockerignore
+├── .env.example                     # All optional keys (SERP, LLM, PSI/CrUX, GSC, GA4, auth, DB)
+├── openapi.yaml                     # OpenAPI 3.0 spec for every endpoint
+├── LICENSE                          # MIT
 ├── mail_config.example.json         # SMTP config template (commit this)
 ├── mail_config.json                 # REAL SMTP credentials — GIT-IGNORED (copy from example)
-├── .gitignore                       # Excludes caches, logs, secrets, test output
+├── .gitignore                       # Excludes caches, logs, secrets, sqlite DBs, generated PDFs
 ├── README.md                        # This documentation
 ├── screenshots/                     # Real tool screenshots used above
 │   ├── 01-landing-dark.png  …  14-url-analysis.png
-├── test_api.py                      # pytest suite (13 tests, mocked network, contract + security asserts)
+├── test_api.py                      # Core pytest suite (13 tests: contract + security + scorer/GSC/M19)
+├── test_enterprise.py               # Enterprise suite (31 tests: SSRF bypass, OTP lockout, PDF slim, M22, new APIs)
+├── scripts/
+│   └── nightly_tracker_cron.py      # Nightly M22 SOV + tracker snapshots → SQLite history
 └── intent_entity_platform/
     ├── __init__.py
     ├── __main__.py
@@ -718,7 +741,7 @@ Full-Time-Content-Assistant-2026/
     │   └── platform_config.json     # Platform configuration
     ├── core/
     │   ├── __init__.py
-    │   ├── engine.py                # PlatformEngine: M01–M03 chain + M04–M21 thread pool, ModuleResult contract
+    │   ├── engine.py                # PlatformEngine: M01–M03 chain + M04–M22 thread pool, ModuleResult contract
     │   ├── input_framework.py       # Typed, validated inputs
     │   ├── output_pipeline.py       # Blueprints + executive summary
     │   ├── benchmarks.py            # Score benchmark targets
@@ -741,21 +764,33 @@ Full-Time-Content-Assistant-2026/
     │   ├── module_15_content_decay.py
     │   ├── module_16_cdn_edge.py
     │   ├── module_17_ab_testing.py     # real power math, assumed inputs (labeled)
-    │   ├── module_18_indexing_sentinel.py  # + AI-crawler audit via engine
+    │   ├── module_18_indexing_sentinel.py  # + AI-crawler completeness (llms.txt + 9-bot split)
     │   ├── module_19_localization_sync.py  # the single wired M19 (URL-aware, hreflang)
     │   ├── module_20_digital_pr.py
-    │   └── module_21_dom_inspector.py
+    │   ├── module_21_dom_inspector.py
+    │   └── module_22_llm_citation.py   # live LLM citation tester (honest_mock without keys)
     ├── data/
-    │   └── serp_cache.sqlite3       # 30-day SERP cache (auto-created, git-ignored pattern)
+    │   ├── prompts.yml              # Prompt library per vertical (B2B SaaS / Ecom / Media / Local)
+    │   ├── serp_cache.sqlite3       # 30-day SERP cache (auto-created, git-ignored)
+    │   └── platform.sqlite3         # OTP/progress/shares/history/audit (auto-created, git-ignored)
     └── utils/
         ├── __init__.py
         ├── text_analytics.py        # Text metrics & analysis helpers
         ├── web_data.py              # Live SERP, Wikidata, Wayback, robots, headers, links (UA rotation + backoff)
-        ├── security.py              # SSRF guard, safe_fetch, rate limiting, validation
+        ├── security.py              # SSRF guard (incl. IPv4-mapped IPv6), safe_fetch, rate limiting, validation
         ├── serp_provider.py         # Serper/DataForSEO/DDG abstraction + cache
         ├── content_scorer.py        # Dual SEO+GEO TF-IDF scorer (`/api/score`)
         ├── brief_generator.py       # SERP-driven briefs (`/api/brief`)
-        └── gsc_quickwins.py         # GSC CSV → quick wins (`/api/gsc_quick_wins`)
+        ├── gsc_quickwins.py         # GSC CSV → quick wins (`/api/gsc_quick_wins`)
+        ├── gsc_oauth.py             # GSC OAuth probe + setup (`/api/gsc_oauth_status`)
+        ├── persistence.py           # SQLite OTP/progress/shares/history/audit (multi-worker safe)
+        ├── ai_crawler_audit.py      # llms.txt + AI-bot robots audit (`/api/ai_crawl_audit`)
+        ├── pagespeed.py             # CrUX + PSI vitals (`/api/pagespeed`)
+        ├── extractability.py        # 40–60w answer-block validator (`/api/extractability`)
+        ├── offsite_authority.py     # Wikipedia + mention graph (`/api/offsite_authority`)
+        ├── multimodal_video.py      # Video/alt/WebP audit (`/api/multimodal_audit`)
+        ├── action_center.py         # Tasks → CSV/Jira/Linear + GA4 stub (`/api/action_center`)
+        └── auth.py                  # API keys + workspaces + audit (`/api/auth/status`)
 ```
 
 ---
@@ -1003,16 +1038,16 @@ The platform is validated end-to-end against **live** targets. Example verificat
 
 ## 🧫 Testing
 
-### pytest suite (13 tests, mocked network — no live calls)
+### pytest suite (44 tests, mocked network — no live calls)
 ```bash
-python -m pytest test_api.py -q
+python -m pytest test_api.py test_enterprise.py -q
 ```
 
-Covers: health, input validation (and no-traceback guarantee), mocked `/api/analyze` + `/api/analyze-url` happy paths, SSRF blocklist (`localhost`, `169.254.x.x`, private ranges, non-HTTP schemes), CSPRNG OTP + single-use flow, security headers, rate-limit 429s, scorer contract, GSC quick-wins, M19 Sync wiring, and the `ModuleResult` contract.
+Covers: health, input validation (and no-traceback guarantee), mocked `/api/analyze` + `/api/analyze-url` happy paths, SSRF blocklist (`localhost`, `169.254.x.x`, private ranges, IPv4-mapped IPv6 `::ffff:127.0.0.1`, userinfo smuggling, non-HTTP schemes) + DNS-rebinding guard, CSPRNG OTP + single-use flow + 5-try lockout + 3-per-window rate cap, security headers, rate-limit 429s, scorer contract, GSC quick-wins + OAuth status, M19 Sync wiring, M22 honest-mock, all-22-module error-path contract, SERP cache hit/miss, PDF overflow truncation + narrative-only slim mode, `/api/download_json` artifact, share + progress SQLite fallback, and every new enterprise endpoint (pagespeed, AI-crawl audit, extractability, off-site authority, multimodal, llm_test/history, tracker, action center CSV/Jira, MCP, docs).
 
 ### Manual verification checklist
 1. `python server.py` → open http://localhost:5000 → HTTP 200.
-2. Run a keyword analysis → 21 module dots turn green (any red indicates a module error to inspect).
+2. Run a keyword analysis → 22 module dots turn green (any red indicates a module error to inspect).
 3. Switch every tab → content renders without JS errors.
 4. Download PDF → open the file → page numbers present, sections start on fresh pages, no margin overflow.
 5. Email flow (SMTP configured) → OTP arrives → wrong OTP rejected with remaining attempts → correct OTP emails the PDF → reusing the OTP fails.
@@ -1032,7 +1067,7 @@ Covers: health, input validation (and no-traceback guarantee), mocked `/api/anal
 | `URL blocked by SSRF guard` | Private/localhost/metadata/non-HTTP URL submitted | Analyze a public `http(s)` URL; intranet and cloud-metadata hosts are intentionally rejected |
 | `429 Rate limit exceeded` | Per-IP hourly quota hit | Wait for the window to reset; put edge rate-limiting on expensive endpoints in prod |
 | PDF won't download | Browser/network policy | Allow localhost downloads, or use another browser |
-| Slow analysis | Many live network calls | M04–M21 run in parallel and SERP results cache for 30 days, so repeat runs are much faster |
+| Slow analysis | Many live network calls | M04–M22 run in parallel and SERP results cache for 30 days, so repeat runs are much faster |
 
 ---
 
@@ -1048,10 +1083,10 @@ A: No. All live data uses free, public endpoints (DuckDuckGo HTML, Wikidata, Way
 A: Yes — locale is configurable (en-US, en-GB, de-DE, fr-FR, ja-JP, en-AU, en-IN, es-ES, …).
 
 **Q: How is the OTP email feature protected from abuse?**
-A: CSPRNG six-digit single-use codes (`secrets` module), 10-minute expiry, max 5 verification attempts, max 3 requests per email per 10 minutes plus per-IP rate limits, strict server-side validation, SSRF-guarded fetching, and in-memory-only storage. Only a verified code can trigger the PDF email.
+A: CSPRNG six-digit single-use codes (`secrets` module), 10-minute expiry, max 5 verification attempts, max 3 requests per email per 10 minutes plus per-IP rate limits, strict server-side validation, SSRF-guarded fetching, and SQLite-persisted storage with TTL (multi-worker safe). Only a verified code can trigger the PDF email.
 
 **Q: Can I use the data programmatically?**
-A: Yes — the Raw JSON tab exposes the complete Blueprint and Module JSON, and the `/api/download_pdf` and `/api/analyze` endpoints are REST-callable.
+A: Yes — the Raw JSON tab exposes the complete Blueprint and Module JSON; `/api/download_json` returns it as a file (raw HTML stripped). REST-callable endpoints include `/api/analyze`, `/api/score`, `/api/brief`, `/api/llm_test`, `/api/action_center`, and the MCP endpoint `/api/mcp` (see `openapi.yaml` + `/api/docs`).
 
 **Q: Does it work offline?**
 A: Partially. Live-data modules need the internet; the rest still analyze locally provided content.

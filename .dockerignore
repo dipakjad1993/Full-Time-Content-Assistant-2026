@@ -1,0 +1,9 @@
+__pycache__/
+*.pyc
+.git/
+.pytest_cache/
+intent_entity_platform/data/*.sqlite3*
+preview_report.pdf
+server.log*
+mail_config.json
+.env

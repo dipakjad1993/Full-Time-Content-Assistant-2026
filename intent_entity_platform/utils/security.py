@@ -30,6 +30,55 @@ _HOST_DENY_RE = re.compile(
     re.IGNORECASE,
 )
 
+
+def _ip_blocked(ip: "ipaddress._BaseAddress") -> bool:
+    """True if IP is private/link-local/loopback incl. IPv4-mapped IPv6 + 6to4/Teredo."""
+    try:
+        for net in _PRIVATE_NETS:
+            try:
+                if ip in net:
+                    return True
+            except TypeError:
+                continue  # v4 vs v6 mismatch
+        # IPv4-mapped IPv6 (::ffff:127.0.0.1) — unwrap and re-check v4 nets
+        mapped = getattr(ip, "ipv4_mapped", None)
+        if mapped is not None:
+            for net in _PRIVATE_NETS:
+                try:
+                    if mapped in net:
+                        return True
+                except TypeError:
+                    continue
+        # 6to4 (2002:V4V4::/48 embeds a v4) + Teredo (2001::/32): unwrap embedded v4
+        try:
+            if ip.version == 6:
+                packed = ip.packed
+                embedded = None
+                if packed[:2] == b"\x20\x02":  # 6to4
+                    embedded = ipaddress.ip_address(int.from_bytes(packed[2:6], "big"))
+                elif packed[:4] == b"\x20\x01\x00\x00":  # Teredo: obfuscated client v4 at tail
+                    obf = int.from_bytes(packed[-4:], "big") ^ 0xFFFFFFFF
+                    embedded = ipaddress.ip_address(obf)
+                if embedded is not None:
+                    for net in _PRIVATE_NETS:
+                        try:
+                            if embedded in net:
+                                return True
+                        except TypeError:
+                            continue
+        except Exception:
+            pass
+        # stdlib truth as backstop (catches unusual ranges)
+        try:
+            if ip.is_private or ip.is_loopback or ip.is_link_local or ip.is_reserved:
+                # is_private covers RFC1918; keep explicit nets authoritative above
+                return True
+        except Exception:
+            pass
+    except Exception:
+        return True  # fail closed on parse anomalies
+    return False
+
 MAX_FETCH_BYTES = 2_000_000
 MAX_REDIRECTS = 3
 
@@ -60,9 +109,8 @@ def is_url_allowed(url: str) -> Tuple[bool, str]:
     # Fast literal-IP check (no DNS)
     try:
         ip = ipaddress.ip_address(host)
-        for net in _PRIVATE_NETS:
-            if ip in net:
-                return False, f"private/link-local IP blocked: {host}"
+        if _ip_blocked(ip):
+            return False, f"private/link-local IP blocked: {host}"
         return True, "ok"
     except ValueError:
         pass  # hostname, resolve below
@@ -80,9 +128,8 @@ def is_url_allowed(url: str) -> Tuple[bool, str]:
                 ip = ipaddress.ip_address(ip_str)
             except ValueError:
                 continue
-            for net in _PRIVATE_NETS:
-                if ip in net:
-                    return False, f"host resolves to private IP: {ip_str}"
+            if _ip_blocked(ip):
+                return False, f"host resolves to private IP: {ip_str}"
         return True, "ok"
     except Exception as e:
         return False, f"DNS resolution failed: {e}"

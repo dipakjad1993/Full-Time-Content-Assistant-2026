@@ -13,8 +13,20 @@ server.log.err
 # Test output
 test_output/
 
+# Generated report artifacts (regenerate via /api/download_pdf)
+preview_report.pdf
+content_intelligence_report_*.pdf
+content_report_*.json
+
 # Secrets - never commit real SMTP credentials
 mail_config.json
+.env
+
+# Enterprise runtime data (SQLite history, SERP cache - regenerated)
+intent_entity_platform/data/*.sqlite3*
+intent_entity_platform/data/*.sqlite3-journal
+intent_entity_platform/data/*.sqlite3-wal
+intent_entity_platform/data/*.sqlite3-shm
 
 # OS
 Thumbs.db

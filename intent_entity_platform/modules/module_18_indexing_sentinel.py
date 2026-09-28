@@ -37,6 +37,22 @@ class IndexingLogSentinel:
         api_push_config = self._configure_api_push(inputs)
         bot_activity = self._analyze_bot_activity(log_data)
         error_analysis = self._analyze_errors(log_data)
+        # v3.0 P0: AI-crawler completeness (llms.txt + 9-bot robots split + meta noai)
+        try:
+            from ..utils.ai_crawler_audit import audit_ai_crawlers
+            _eff_url = url_from_data or url or ""
+            _robots_txt = ""
+            try:
+                from ..utils.web_data import fetch_robots_txt
+                _rb = fetch_robots_txt(_eff_url) if _eff_url else {}
+                _robots_txt = (_rb.get("content") or _rb.get("text") or "") if isinstance(_rb, dict) else ""
+            except Exception:
+                _robots_txt = ""
+            ai_crawler_audit = audit_ai_crawlers(
+                _eff_url, _robots_txt, (_url_data.get("raw_html", "") if isinstance(_url_data, dict) else ""))
+        except Exception as _e:
+            ai_crawler_audit = {"status": "AUDIT_ERROR", "error": str(_e)[:200],
+                                "method_note": "AI-crawler audit failed gracefully; core indexing checks unaffected."}
 
         return {
             "module": self.module_id,
@@ -52,6 +68,7 @@ class IndexingLogSentinel:
             "api_push_configuration": api_push_config,
             "bot_activity_analysis": bot_activity,
             "error_analysis": error_analysis,
+            "ai_crawler_completeness": ai_crawler_audit,
             "recommendations": self._generate_recommendations(indexing_status, log_analysis, error_analysis),
             "implementation_steps": [
                 "Step 1: Verify the target URL is included in your XML sitemap and the sitemap is submitted in GSC",

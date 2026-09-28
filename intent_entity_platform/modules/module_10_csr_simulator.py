@@ -74,6 +74,7 @@ class CSRSimulator:
             ],
             "detailed_analysis": {
                 "industry_benchmarks": {
+                    "data_origin": "unverified_industry_heuristic - not measured for this page",
                     "ssr_adoption_rate": "78% of top-ranking websites use server-side rendering",
                     "content_availability_score": "Leading sites achieve 95%+ content availability in initial HTML",
                     "core_web_vitals_pass_rate": "Top 10% of websites pass all three Core Web Vitals",
@@ -84,8 +85,8 @@ class CSRSimulator:
                     "acceptable_lcp": "Under 2.5 seconds for good user experience",
                     "acceptable_cls": "Under 0.1 for stable visual layout",
                     "acceptable_inp": "Under 200ms for responsive interaction",
-                    "script_tag_optimal": "Under 10 script tags for fast rendering",
-                    "lazy_loading_threshold": "Lazy load images below 800px viewport position"
+                    "script_tag_optimal": "(General industry guidance, unverified): Under 10 script tags for fast rendering",
+                    "lazy_loading_threshold": "(General industry guidance, unverified): Lazy load images below 800px viewport position"
                 },
                 "expert_recommendations": [
                     "Prioritize SSR or SSG for content-heavy pages to ensure crawlability",
@@ -114,7 +115,8 @@ class CSRSimulator:
                     "Largest Contentful Paint (LCP) under 2.5 seconds",
                     "Cumulative Layout Shift (CLS) under 0.1"
                 ]
-            }
+            },
+            "data_source": "real_time_analysis"
         }
 
     def _analyze_url_rendering(self, url_data: Dict) -> Dict[str, Any]:

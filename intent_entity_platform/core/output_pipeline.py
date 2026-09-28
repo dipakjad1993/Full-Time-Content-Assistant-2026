@@ -69,7 +69,8 @@ class OutputPipeline:
                 "fluff_score_target": "< 0.3 (currently: " + str(fluff.get("overall_quality_score", {}).get("overall_score", "N/A")) + ")",
                 "burstiness_target": "Coefficient of variation > 0.5",
                 "ai_pattern_target": "AI probability score < 0.2",
-                "word_count_target": str(outline.get("structural_metrics", {}).get("total_estimated_word_count", 2500)) + " words"
+                "word_count_target": str(outline.get("structural_metrics", {}).get("total_estimated_word_count", 2500)) + " words",
+                "targets_annotation": "Heuristic industry targets for writing quality - guidance only, not measured benchmarks"
             },
             "writing_guidelines": {
                 "opening_strategy": intent.get("intent_alignment", {}).get("detected_intents", ["informational"]),
@@ -165,14 +166,17 @@ class OutputPipeline:
         high_priority = []
         all_recommendations = []
         for module_id, module_results in results.items():
-            if isinstance(module_results, dict):
-                for rec in module_results.get("recommendations", []):
-                    rec["module"] = module_id
-                    all_recommendations.append(rec)
-                    if rec.get("priority") == "CRITICAL":
-                        critical_issues.append(rec)
-                    elif rec.get("priority") == "HIGH":
-                        high_priority.append(rec)
+            if not isinstance(module_results, dict):
+                continue
+            for rec in module_results.get("recommendations", []):
+                if isinstance(rec, str):
+                    rec = {"action": rec, "priority": "INFO"}
+                rec["module"] = module_id
+                all_recommendations.append(rec)
+                if rec.get("priority") == "CRITICAL":
+                    critical_issues.append(rec)
+                elif rec.get("priority") == "HIGH":
+                    high_priority.append(rec)
         # Real module health from actual results/errors
         module_health = {}
         module_names = {
@@ -192,6 +196,25 @@ class OutputPipeline:
                 module_health[mname] = f"Module {module_id[1:]} completed"
             else:
                 module_health[mname] = f"Module {module_id[1:]} no output"
+
+        # Real competitive landscape from live competitor research (M01 benchmarking)
+        competitive_landscape = {}
+        for mid, mr in results.items():
+            if not isinstance(mr, dict):
+                continue
+            cb = mr.get("competitive_benchmarking", {}) or {}
+            if cb.get("competitors_analyzed"):
+                competitive_landscape = {
+                    "competitors_analyzed": cb.get("competitors_analyzed", 0),
+                    "serp_results_reviewed": cb.get("serp_results_reviewed", 0),
+                    "your_content_vs_competitors": cb.get("your_content_vs_competitors", {}),
+                    "competitor_content_benchmarks": cb.get("competitor_content_benchmarks", {}),
+                    "content_gaps_vs_competitors": cb.get("content_gaps_vs_competitors", []),
+                    "competitor_entity_themes": cb.get("competitor_entity_themes", []),
+                    "serp_features_detected": cb.get("serp_features_detected", {}),
+                }
+                break
+
         return {
             "section": "EXECUTIVE SUMMARY",
             "total_modules_executed": len(results),
@@ -201,13 +224,8 @@ class OutputPipeline:
             "critical_issues": critical_issues[:10],
             "high_priority_actions": high_priority[:15],
             "module_health_scores": module_health,
-            "top_5_actions": [
-                critical_issues[0] if critical_issues else {"action": "No critical issues found", "priority": "INFO"},
-                critical_issues[1] if len(critical_issues) > 1 else high_priority[0] if high_priority else {"action": "Review all module outputs", "priority": "INFO"},
-                high_priority[0] if high_priority else {"action": "Implement schema markup", "priority": "MEDIUM"},
-                high_priority[1] if len(high_priority) > 1 else {"action": "Optimize content structure", "priority": "MEDIUM"},
-                high_priority[2] if len(high_priority) > 2 else {"action": "Set up post-publish monitoring", "priority": "MEDIUM"}
-            ]
+            "top_5_actions": (critical_issues + high_priority + all_recommendations)[:5],
+            "competitive_landscape": competitive_landscape
         }
 
     def export_json(self, blueprint: Dict, filepath: str):
@@ -262,7 +280,12 @@ class OutputPipeline:
         lines.append(f"Hallucination Risk: {technical.get('hallucination_risk', 'N/A')}")
         lines.append(f"DOM Size: {technical.get('dom_size', 'N/A')}")
         lines.append(f"CSR Rendering: {technical.get('csr_rendering_status', 'N/A')}")
-        lines.append(f"\n{'=' * 80}")
-        lines.append("BLUEPRINT COMPLETE - All 21 modules executed successfully")
-        lines.append(f"{'=' * 80}")
+        health = exec_summary.get("module_health_scores", {})
+        failed = [v for v in health.values() if "FAILED" in v]
+        no_output = [v for v in health.values() if "no output" in v]
+        if failed or no_output:
+            lines.append("\nATTENTION: Some modules did not complete or produced no output:")
+            for v in (failed + no_output):
+                lines.append(f"  - {v}")
+        lines.append("=" * 80)
         return '\n'.join(lines)

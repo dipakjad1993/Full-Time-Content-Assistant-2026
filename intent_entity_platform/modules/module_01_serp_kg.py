@@ -11,7 +11,7 @@ from ..utils.text_analytics import (
     extract_keyphrases, extract_entities_simple, tokenize_words,
     cosine_similarity, tf_idf_vectorize, text_statistics
 )
-from ..utils.web_data import web_search as _real_web_search, search_wikidata
+from ..utils.web_data import web_search as _real_web_search, search_wikidata, _open, _read_body
 
 
 class SERPKnowledgeGraphParser:
@@ -145,7 +145,7 @@ class SERPKnowledgeGraphParser:
 
         content_issues = []
         if title_length < 30:
-            content_issues.append(f"Title too short ({title_length} chars). Industry average is 50-60 chars for optimal SERP display.")
+            content_issues.append(f"Title too short ({title_length} chars). (General industry guidance, unverified): 50-60 chars is a common SERP display length.")
         if title_length > 70:
             content_issues.append(f"Title too long ({title_length} chars). Will be truncated in SERPs. Optimal: 50-60 chars.")
         if h1_length == 0:
@@ -157,34 +157,34 @@ class SERPKnowledgeGraphParser:
         if meta_desc_length > 160:
             content_issues.append(f"Meta description too long ({meta_desc_length} chars). Will be truncated. Optimal: 150-160 chars.")
         if len(h2s) < 3:
-            content_issues.append(f"Only {len(h2s)} H2 headings found. Competitive pages average 8-12 H2 sections.")
+            content_issues.append(f"Only {len(h2s)} H2 headings found. (General industry guidance, unverified): Competitive pages average 8-12 H2 sections.")
         if word_count < 1500:
-            content_issues.append(f"Word count {word_count} is below minimum. Competitive niche requires 2000-4000 words.")
+            content_issues.append(f"Word count {word_count} is below minimum. (General industry guidance, unverified): Competitive niches often target 2000-4000 words.")
         if not has_schema:
             content_issues.append("No structured data detected. Add TechArticle, FAQPage, and BreadcrumbList schema.")
         if entity_mentions_in_text < 3:
-            content_issues.append(f"Primary entity mentioned only {entity_mentions_in_text} times. Aim for 8-12 natural mentions.")
+            content_issues.append(f"Primary entity mentioned only {entity_mentions_in_text} times. (General industry guidance, unverified): Aim for 8-12 natural mentions.")
 
         return {
             "url": url,
             "page_title": title,
             "title_length": title_length,
-            "title_length_benchmark": "Industry average: 50-60 chars",
+            "title_length_benchmark": "(General industry guidance, unverified): 50-60 chars is a common target",
             "h1_heading": h1,
             "h1_length": h1_length,
             "meta_description": meta_desc[:200] + "..." if len(meta_desc) > 200 else meta_desc,
             "meta_description_length": meta_desc_length,
             "word_count": word_count,
-            "word_count_benchmark": "Competitive pages: 2000-4000 words",
+            "word_count_benchmark": "(General industry guidance, unverified): Competitive pages often run 2000-4000 words",
             "h2_count": len(h2s),
-            "h2_count_benchmark": "Top-ranking pages: 8-12 H2 sections",
+            "h2_count_benchmark": "(General industry guidance, unverified): Top-ranking pages often have 8-12 H2 sections",
             "avg_h2_length": round(avg_h2_length, 1),
             "link_count": link_count,
             "internal_links": len(internal_links),
             "external_links": len(external_links),
-            "link_benchmark": "Recommended: 5-10 internal, 3-5 external per page",
+            "link_benchmark": "(General industry guidance, unverified): 5-10 internal, 3-5 external links per page",
             "image_count": image_count,
-            "image_benchmark": "Top pages: 5-10 images with descriptive alt text",
+            "image_benchmark": "(General industry guidance, unverified): 5-10 images with descriptive alt text per page",
             "images_without_alt": sum(1 for img in images if not img.get("alt", "").strip()),
             "has_schema_markup": has_schema,
             "entity_alignment": {
@@ -193,7 +193,7 @@ class SERPKnowledgeGraphParser:
                 "entity_in_meta_description": entity_in_meta,
                 "seed_in_title": seed_in_title,
                 "entity_mentions_in_text": entity_mentions_in_text,
-                "entity_mention_benchmark": "8-12 natural mentions recommended",
+                "entity_mention_benchmark": "(General industry guidance, unverified): 8-12 natural mentions is a common recommendation",
                 "alignment_score": round(title_entity_score, 3)
             },
             "knowledge_panel_potential": {
@@ -249,7 +249,7 @@ class SERPKnowledgeGraphParser:
             recs.append({
                 "priority": "HIGH",
                 "action": f"Add {5 - len(h2s)}+ more H2 sections for comprehensive coverage",
-                "detail": f"Only {len(h2s)} H2s found. Competitive pages average 8-12 H2 sections for topical depth."
+                "detail": f"Only {len(h2s)} H2s found. (General industry guidance, unverified): Competitive pages average 8-12 H2 sections for topical depth."
             })
 
         if word_count < 2000:
@@ -263,7 +263,7 @@ class SERPKnowledgeGraphParser:
             recs.append({
                 "priority": "HIGH",
                 "action": "Implement JSON-LD structured data (TechArticle, FAQPage, BreadcrumbList)",
-                "detail": "No schema detected. Pages with structured data see 25-40% higher rich snippet appearance rates."
+                "detail": "No schema detected. (General industry guidance, unverified): pages with structured data see 25-40% higher rich snippet appearance rates."
             })
 
         images_without_alt = sum(1 for img in images if not img.get("alt", "").strip())
@@ -396,18 +396,45 @@ class SERPKnowledgeGraphParser:
         return relationships[:50]
 
     def _suggest_knowledge_graph_uris(self, entity: str, query: str) -> Dict[str, str]:
-        """Suggest Knowledge Graph and Wikidata URIs using REAL Wikidata lookups."""
+        """Suggest Knowledge Graph URIs using ONLY real, verified Wikidata lookups."""
         normalized = entity.lower().replace(" ", "_")
         wd = search_wikidata(entity)
         wd_results = wd.get("results", [])
         wikidata_url = wd_results[0]["url"] if wd_results else None
+        wikidata_id = wd_results[0]["id"] if wd_results else None
+
+        same_as_candidates = []
+        if wikidata_url:
+            same_as_candidates.append(wikidata_url)
+        if wikidata_id:
+            # Resolve the entity's real sitelinks via Wikidata API for the
+            # canonical Wikipedia article (only if it actually exists).
+            try:
+                from ..utils.web_data import fetch_page
+                wd_api = ("https://www.wikidata.org/w/api.php?action=wbgetentities&ids="
+                          + urllib.parse.quote(wikidata_id)
+                          + "&props=sitelinks&sitefilter=enwiki&format=json")
+                resp = _open(wd_api, timeout=15, headers={"Accept": "application/json"})
+                if resp is not None:
+                    body = _read_body(resp)
+                    data = json.loads(body)
+                    enwiki = (data.get("entities", {}).get(wikidata_id, {})
+                              .get("sitelinks", {}).get("enwiki", {}).get("title", ""))
+                    if enwiki:
+                        wiki_url = "https://en.wikipedia.org/wiki/" + enwiki.replace(" ", "_")
+                        same_as_candidates.append(wiki_url)
+            except Exception:
+                pass
+
         return {
-            "wikidata": wikidata_url or f"https://www.wikidata.org/wiki/Special:Search?search={urllib.parse.quote(entity)}",
-            "google_knowledge_graph": f"https://kgsearch.googleapis.com/v1/entities:search?query={entity.replace(' ', '+')}&key=[API_KEY_REQUIRED]",
-            "dbpedia": f"https://dbpedia.org/resource/{normalized.replace(' ', '_')}",
-            "freebase": f"https://freebase.com/m/{normalized.replace(' ', '_')}",
-            "schema_org_sameAs_candidate": f"https://en.wikipedia.org/wiki/{normalized.replace(' ', '_')}",
-            "wikidata_verified": bool(wd_results)
+            "wikidata": wikidata_url or "",
+            "wikidata_id": wikidata_id or "",
+            "wikidata_label": wd_results[0]["label"] if wd_results else "",
+            "wikidata_description": wd_results[0]["description"] if wd_results else "",
+            "sameAs_candidates": same_as_candidates,
+            "search_url": f"https://www.wikidata.org/wiki/Special:Search?search={urllib.parse.quote(entity)}",
+            "wikidata_verified": bool(wd_results),
+            "verification_note": "No verified Knowledge Graph entity found - only public Wikidata references are provided"
         }
 
     def _calculate_entity_density(self, text: str, entities: List[Dict]) -> float:
@@ -419,18 +446,23 @@ class SERPKnowledgeGraphParser:
         return round(min(1.0, entity_mentions / max(1, len(words))), 4)
 
     def _analyze_serp_features(self, query: str, locale: str, device: str, serp_results: List[Dict] = None) -> Dict[str, Any]:
-        """Analyze expected SERP features for the query (heuristic + real detection)."""
+        """Analyze expected SERP features for the query.
+
+        Probabilities are labeled heuristics (not measured data): they are only
+        used to prioritize optimization targets. Features actually detected in
+        the live SERP are marked as detected_in_live_serp and take precedence.
+        """
         query_words = set(tokenize_words(query))
         feature_probabilities = {
-            "ai_overview": {"base": 0.85, "query_modifiers": {"how": 0.1, "what": 0.1, "best": 0.05, "vs": 0.05}},
-            "featured_snippet": {"base": 0.7, "query_modifiers": {"how": 0.15, "what": 0.1, "why": 0.1}},
-            "people_also_ask": {"base": 0.9, "query_modifiers": {"how": 0.05, "what": 0.05}},
-            "knowledge_panel": {"base": 0.4, "query_modifiers": {"who": 0.2, "when": 0.15}},
-            "local_pack": {"base": 0.1, "query_modifiers": {"near me": 0.5, "local": 0.3}},
-            "video_pack": {"base": 0.3, "query_modifiers": {"tutorial": 0.3, "how to": 0.25, "review": 0.2}},
-            "image_pack": {"base": 0.25, "query_modifiers": {"examples": 0.3, "template": 0.25}},
-            "shopping_results": {"base": 0.15, "query_modifiers": {"buy": 0.5, "price": 0.3, "best": 0.2}},
-            "discussion_forums": {"base": 0.2, "query_modifiers": {"reddit": 0.4, "forum": 0.5, "opinion": 0.3}},
+            "ai_overview": {"base": 0.5, "query_modifiers": {"how": 0.1, "what": 0.1, "best": 0.05, "vs": 0.05}},
+            "featured_snippet": {"base": 0.5, "query_modifiers": {"how": 0.15, "what": 0.1, "why": 0.1}},
+            "people_also_ask": {"base": 0.5, "query_modifiers": {"how": 0.05, "what": 0.05}},
+            "knowledge_panel": {"base": 0.5, "query_modifiers": {"who": 0.2, "when": 0.15}},
+            "local_pack": {"base": 0.5, "query_modifiers": {"near me": 0.3, "local": 0.2}},
+            "video_pack": {"base": 0.5, "query_modifiers": {"tutorial": 0.2, "how to": 0.15, "review": 0.1}},
+            "image_pack": {"base": 0.5, "query_modifiers": {"examples": 0.2, "template": 0.15}},
+            "shopping_results": {"base": 0.5, "query_modifiers": {"buy": 0.3, "price": 0.2, "best": 0.1}},
+            "discussion_forums": {"base": 0.5, "query_modifiers": {"reddit": 0.25, "forum": 0.3, "opinion": 0.2}},
         }
         features = {}
         for feature, config in feature_probabilities.items():
@@ -439,9 +471,11 @@ class SERPKnowledgeGraphParser:
                 if modifier in query.lower():
                     prob += boost
             features[feature] = {
-                "probability": round(min(1.0, prob), 3),
-                "expected": prob > 0.5,
-                "optimization_priority": "high" if prob > 0.7 else "medium" if prob > 0.4 else "low"
+                "probability": round(min(1.0, max(0.0, prob)), 3),
+                "probability_source": "heuristic_estimate",
+                "estimate": True,
+                "expected": prob > 0.6,
+                "optimization_priority": "high" if prob > 0.7 else "medium" if prob > 0.5 else "low"
             }
 
         # REAL feature detection from live SERP results
@@ -460,10 +494,10 @@ class SERPKnowledgeGraphParser:
                 continue
             hits = [d for d in domains if d in detected_domains]
             if hits:
-                boost = 0.15 + 0.1 * min(2, len(hits))
-                features[feature]["probability"] = round(min(1.0, features[feature]["probability"] + boost), 3)
+                features[feature]["probability"] = round(min(1.0, features[feature]["probability"] + 0.1), 3)
                 features[feature]["detected_in_live_serp"] = hits
-                features[feature]["expected"] = features[feature]["probability"] > 0.5
+                features[feature]["probability_source"] = "live_serp_detection"
+                features[feature]["expected"] = True
 
         device_adjustments = {
             "mobile": {"ai_overview": -0.1, "featured_snippet": 0.05, "local_pack": 0.1},
@@ -873,57 +907,63 @@ class SERPKnowledgeGraphParser:
         return {
             "entity_graph_insights": {
                 "total_entities_mapped": entity_graph.get("entity_count", 0),
-                "entity_density_benchmark": "Top-ranking pages average 15-25 unique entity mentions per 1000 words",
-                "statistical_range": f"Current entity count: {entity_graph.get('entity_count', 0)} (industry target: 20-30 for competitive niches)",
+                "entity_density_benchmark": "(General industry guidance, unverified): Top-ranking pages average 15-25 unique entity mentions per 1000 words",
+                "statistical_range": f"Current entity count: {entity_graph.get('entity_count', 0)} (General industry guidance, unverified target: 20-30 for competitive niches)",
                 "expert_recommendation": "Ensure primary entity appears in H1, first paragraph, at least 2 H2s, and schema markup",
                 "common_mistakes": ["Overusing primary entity without introducing related entities", "Ignoring Knowledge Graph URI alignment", "Missing entity relationships in schema"],
-                "success_metrics": ["Entity coverage ratio > 80%", "Knowledge Graph panel trigger on brand entity", "3+ related entities per H2 section"]
+                "success_metrics": ["Entity coverage ratio > 80%", "Knowledge Graph panel trigger on brand entity", "3+ related entities per H2 section"],
+                "data_origin": "unverified_industry_heuristic - not measured for this page"
             },
             "serp_features_insights": {
                 "primary_target": serp_features.get("primary_optimization_target", "N/A"),
                 "ai_overview_probability": serp_features.get("features", {}).get("ai_overview", {}).get("probability", 0),
-                "benchmark": "AI Overviews appear for 85% of informational queries in 2026; featured snippets for 70%",
+                "benchmark": "(General industry guidance, unverified): AI Overviews are commonly reported to appear for ~85% of informational queries, featured snippets for ~70%",
                 "statistical_range": f"Estimated organic slots: {serp_features.get('estimated_serp_composition', {}).get('estimated_organic_slots', 'N/A')}",
                 "expert_recommendation": "Structure content with 40-60 word definition blocks to maximize AI Overview citation probability",
                 "common_mistakes": ["Writing long introductions without direct answers", "Skipping structured data implementation", "Ignoring mobile SERP layout differences"],
-                "success_metrics": ["AI Overview citation within 60 days", "Featured snippet capture rate > 30%", "Organic CTR improvement > 15%"]
+                "success_metrics": ["AI Overview citation within 60 days", "Featured snippet capture rate > 30%", "Organic CTR improvement > 15%"],
+                "data_origin": "unverified_industry_heuristic - not measured for this page"
             },
             "paa_clusters_insights": {
                 "total_questions": paa_clusters.get("total_questions_identified", 0),
                 "high_priority_count": len(paa_clusters.get("top_priority_questions", [])),
-                "benchmark": "Top pages answer 7-10 PAA questions with dedicated content blocks averaging 40-60 words each",
+                "benchmark": "(General industry guidance, unverified): Top pages answer 7-10 PAA questions with dedicated content blocks averaging 40-60 words each",
                 "statistical_range": f"Question categories covered: {sum(1 for v in paa_clusters.get('categories', {}).values() if v)}/6",
                 "expert_recommendation": "Address all definitional and comparative PAA questions first as they have highest extraction probability",
                 "common_mistakes": ["Answering questions in prose instead of structured format", "Missing question variations", "Answers exceeding 60 words"],
-                "success_metrics": ["PAA appearance for target queries", "Answer extraction rate > 50%", "Question-specific CTR > 20%"]
+                "success_metrics": ["PAA appearance for target queries", "Answer extraction rate > 50%", "Question-specific CTR > 20%"],
+                "data_origin": "unverified_industry_heuristic - not measured for this page"
             },
             "entity_coverage_insights": {
                 "coverage_ratio": entity_coverage.get("coverage_ratio", 0),
                 "gap_opportunities": entity_coverage.get("gap_opportunities", 0),
-                "benchmark": "Competitive pages cover 75-90% of relevant entities; top 10 results average 85% coverage",
-                "statistical_range": f"Current coverage: {entity_coverage.get('coverage_ratio', 0)*100:.0f}% vs target: 80%+",
+                "benchmark": "(General industry guidance, unverified): Competitive pages cover 75-90% of relevant entities; top 10 results average 85% coverage",
+                "statistical_range": f"Current coverage: {entity_coverage.get('coverage_ratio', 0)*100:.0f}% vs unverified heuristic target: 80%+",
                 "expert_recommendation": "Prioritize gap entities that competitors have not covered for first-mover differentiation advantage",
                 "common_mistakes": ["Focusing only on primary entity without covering the entity graph", "Ignoring uncovered entities that represent ranking opportunities"],
-                "success_metrics": ["Entity coverage ratio > 85%", "Gap entity coverage > 50%", "Entity count matching top 3 competitors"]
+                "success_metrics": ["Entity coverage ratio > 85%", "Gap entity coverage > 50%", "Entity count matching top 3 competitors"],
+                "data_origin": "unverified_industry_heuristic - not measured for this page"
             },
             "topical_authority_insights": {
                 "combined_score": topical_authority.get("combined_authority_score", 0),
                 "required_word_count": topical_authority.get("required_word_count_estimate", 2500),
                 "authority_tier": topical_authority.get("authority_tier", "UNKNOWN"),
-                "benchmark": "Topically authoritative content averages 3000-5000 words with 10+ H2 sections and 5+ external citations",
+                "benchmark": "(General industry guidance, unverified): Topically authoritative content averages 3000-5000 words with 10+ H2 sections and 5+ external citations",
                 "statistical_range": f"Target word count: {topical_authority.get('required_word_count_estimate', 2500)} words, {topical_authority.get('required_heading_count', 8)} headings",
                 "expert_recommendation": "Aim for TIER_1_DEEP authority by covering all Level-1 and Level-2 entities with unique data",
                 "common_mistakes": ["Publishing thin content under 2000 words for competitive queries", "Missing required external citations", "Insufficient heading hierarchy depth"],
-                "success_metrics": ["Organic rankings for 5+ related keywords", "Average dwell time > 4 minutes", "Featured snippet or AI Overview citation"]
+                "success_metrics": ["Organic rankings for 5+ related keywords", "Average dwell time > 4 minutes", "Featured snippet or AI Overview citation"],
+                "data_origin": "unverified_industry_heuristic - not measured for this page"
             },
             "keyword_landscape_insights": {
                 "total_unique_terms": keyword_landscape.get("total_unique_keyword_terms", 0),
                 "gap_percentage": keyword_landscape.get("gap_percentage", 0),
                 "coverage_percentage": keyword_landscape.get("coverage_percentage", 0),
-                "benchmark": "Competitive pages cover 70-85% of target keyword terms; long-tail variations should include 10-15 unique phrases",
+                "benchmark": "(General industry guidance, unverified): Competitive pages cover 70-85% of target keyword terms; long-tail variations should include 10-15 unique phrases",
                 "statistical_range": f"Keyword gap: {keyword_landscape.get('gap_percentage', 0)}% terms not found in competitor content",
                 "expert_recommendation": "Target gap keywords for quick wins and use long-tail variations to build topical depth",
                 "common_mistakes": ["Ignoring long-tail keyword opportunities", "Over-optimizing for exact match keywords", "Missing commercial and question-modifier terms"],
-                "success_metrics": ["Keyword coverage > 80%", "Rankings for 3+ long-tail variations", "Organic traffic growth > 25% in 90 days"]
+                "success_metrics": ["Keyword coverage > 80%", "Rankings for 3+ long-tail variations", "Organic traffic growth > 25% in 90 days"],
+                "data_origin": "unverified_industry_heuristic - not measured for this page"
             }
         }

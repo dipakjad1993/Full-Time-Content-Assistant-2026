@@ -19,7 +19,7 @@ class SemanticStructureSchema:
         self.module_name = "Semantic Content Structuring & Schema Generation"
 
     def analyze(self, inputs: Dict[str, Any], serp_data: Dict, geo_data: Dict) -> Dict[str, Any]:
-        """Full semantic structuring and schema generation pipeline."""
+        """Full semantic structuring and schema generation pipeline with REAL competitor data."""
         seed_phrase = inputs.get("seed_phrase", "")
         primary_entity = inputs.get("primary_entity", "")
         entity_graph = serp_data.get("entity_graph", {})
@@ -27,15 +27,23 @@ class SemanticStructureSchema:
         answer_triggers = geo_data.get("answer_triggers", {})
         audience = inputs.get("audience", {})
         url_data = inputs.get("_url_data", None)
+        
+        # NEW: Use real competitor data from live fetches
+        real_competitor_pages = inputs.get("real_competitor_pages", [])
+        real_content_analysis = inputs.get("real_content_analysis", {})
+        real_schema_analysis = inputs.get("real_schema_analysis", {})
 
         hierarchical_outline = self._build_hierarchical_outline(
             seed_phrase, primary_entity, entity_graph, paa_clusters, audience
         )
         direct_answer_blocks = self._generate_direct_answer_blocks(seed_phrase, primary_entity, answer_triggers)
         semantic_sections = self._build_semantic_sections(hierarchical_outline, entity_graph)
-        schema_payloads = self._generate_schema_payloads(seed_phrase, primary_entity, entity_graph, hierarchical_outline)
+        schema_payloads = self._generate_schema_payloads(seed_phrase, primary_entity, entity_graph, hierarchical_outline, inputs)
         content_flow = self._design_content_flow(hierarchical_outline, audience)
         heading_optimization = self._optimize_headings(hierarchical_outline, seed_phrase)
+        
+        # NEW: Analyze real competitor semantic structures
+        real_competitor_structure_analysis = self._analyze_real_competitor_structure(real_competitor_pages, real_content_analysis, real_schema_analysis)
 
         url_structure_analysis = self._analyze_url_structure(url_data, seed_phrase, primary_entity) if url_data else None
 
@@ -52,7 +60,10 @@ class SemanticStructureSchema:
             "recommendations": self._generate_recommendations(hierarchical_outline, schema_payloads, heading_optimization),
             "implementation_steps": self._generate_implementation_steps(hierarchical_outline, schema_payloads, heading_optimization),
             "where_to_add": self._generate_where_to_add(schema_payloads, hierarchical_outline),
-            "detailed_analysis": self._generate_detailed_analysis(hierarchical_outline, schema_payloads, heading_optimization, direct_answer_blocks)
+            "detailed_analysis": self._generate_detailed_analysis(hierarchical_outline, schema_payloads, heading_optimization, direct_answer_blocks),
+            "real_competitor_structure_analysis": real_competitor_structure_analysis,
+            "data_source": "real_time_competitor_analysis",
+            "competitors_analyzed": len([p for p in real_competitor_pages if p.get("fetch_success")])
         }
 
         if url_data and url_structure_analysis:
@@ -61,6 +72,100 @@ class SemanticStructureSchema:
             result["detailed_analysis"]["url_structure_insights"] = url_structure_analysis
 
         return result
+
+    def _analyze_real_competitor_structure(self, competitor_pages: List[Dict], content_analysis: Dict, schema_analysis: Dict) -> Dict[str, Any]:
+        """Analyze real competitor page structures - VERIFIED LIVE DATA."""
+        if not competitor_pages:
+            return {"error": "No competitor data available", "source": "N/A"}
+        
+        successful_pages = [p for p in competitor_pages if p.get("fetch_success")]
+        if not successful_pages:
+            return {"error": "No successful competitor fetches", "source": "N/A"}
+        
+        # Analyze each competitor's structure
+        competitor_structures = []
+        for page in competitor_pages:
+            if not page.get("fetch_success"):
+                continue
+            h2s = page.get("h2s", [])
+            h3s = page.get("h3s", [])
+            h1 = page.get("h1", "")
+            title = page.get("title", "")
+            
+            # Categorize heading types
+            question_headings = [h for h in h2s if "?" in h]
+            howto_headings = [h for h in h2s if any(w in h.lower() for w in ["how to", "guide", "tutorial", "step"])]
+            comparison_headings = [h for h in h2s if any(w in h.lower() for w in ["vs", "versus", "comparison", "compare", "best"])]
+            definition_headings = [h for h in h2s if any(w in h.lower() for w in ["what is", "definition", "overview", "introduction"])]
+            
+            competitor_structures.append({
+                "url": page.get("url", ""),
+                "position": page.get("position", 0),
+                "title": title,
+                "h1": h1,
+                "h2_count": len(h2s),
+                "h3_count": len(h3s),
+                "heading_patterns": {
+                    "question_headings": question_headings[:5],
+                    "howto_headings": howto_headings[:5],
+                    "comparison_headings": comparison_headings[:5],
+                    "definition_headings": definition_headings[:5]
+                },
+                "all_h2s": h2s,
+                "all_h3s": h3s,
+                "word_count": page.get("word_count", 0),
+                "has_schema": page.get("has_schema", False),
+                "schema_count": page.get("schema_count", 0)
+            })
+        
+        # Calculate structure benchmarks from real data
+        avg_h2s = sum(c["h2_count"] for c in competitor_structures) / len(competitor_structures) if competitor_structures else 0
+        avg_h3s = sum(c["h3_count"] for c in competitor_structures) / len(competitor_structures) if competitor_structures else 0
+        avg_word_count = sum(c["word_count"] for c in competitor_structures) / len(competitor_structures) if competitor_structures else 0
+        schema_users = sum(1 for c in competitor_structures if c["has_schema"])
+        
+        # Collect all heading patterns across competitors
+        all_question_headings = []
+        all_howto_headings = []
+        all_comparison_headings = []
+        all_definition_headings = []
+        
+        for c in competitor_structures:
+            all_question_headings.extend(c["heading_patterns"]["question_headings"])
+            all_howto_headings.extend(c["heading_patterns"]["howto_headings"])
+            all_comparison_headings.extend(c["heading_patterns"]["comparison_headings"])
+            all_definition_headings.extend(c["heading_patterns"]["definition_headings"])
+        
+        return {
+            "competitors_analyzed": len(competitor_structures),
+            "competitor_structures": competitor_structures,
+            "benchmarks_from_real_data": {
+                "avg_h2_count": round(avg_h2s, 1),
+                "avg_h3_count": round(avg_h3s, 1),
+                "avg_word_count": round(avg_word_count),
+                "schema_usage": f"{schema_users}/{len(competitor_structures)}",
+                "schema_percentage": round(schema_users / len(competitor_structures) * 100, 1) if competitor_structures else 0
+            },
+            "heading_pattern_analysis": {
+                "question_headings_found": len(all_question_headings),
+                "howto_headings_found": len(all_howto_headings),
+                "comparison_headings_found": len(all_comparison_headings),
+                "definition_headings_found": len(all_definition_headings),
+                "top_question_headings": all_question_headings[:10],
+                "top_howto_headings": all_howto_headings[:10],
+                "top_comparison_headings": all_comparison_headings[:10],
+                "top_definition_headings": all_definition_headings[:10]
+            },
+            "recommendations": [
+                f"Target {round(avg_h2s)}+ H2 sections (competitors average {avg_h2s:.1f})",
+                f"Include {round(avg_h3s)}+ H3 subsections for depth",
+                f"Aim for {round(avg_word_count)}+ words (competitors average {avg_word_count:.0f})",
+                "Implement schema markup" if schema_users < len(competitor_structures) else "Schema markup already competitive",
+                f"Add {max(0, 5 - len(all_question_headings))} question-based H2 headings",
+                f"Add {max(0, 3 - len(all_howto_headings))} how-to/guide H2 headings"
+            ],
+            "data_source": "live_competitor_page_analysis"
+        }
 
     def _analyze_url_structure(self, url_data: Dict, seed_phrase: str, primary_entity: str) -> Dict[str, Any]:
         """Deep analysis of actual URL semantic structure and schema coverage."""
@@ -128,7 +233,7 @@ class SemanticStructureSchema:
         if len(h2s) < 3:
             structure_issues.append(f"Only {len(h2s)} H2 headings found. Minimum 3 recommended for content structure.")
         if len(h2s) < 8:
-            structure_issues.append(f"Only {len(h2s)} H2 headings. Competitive content averages 8-12 H2 sections.")
+            structure_issues.append(f"Only {len(h2s)} H2 headings. (General industry guidance, unverified): Competitive content averages 8-12 H2 sections.")
         if word_count < 1500:
             structure_issues.append(f"Word count {word_count} is below 1500. Add depth to each H2 section.")
         if not has_schema:
@@ -158,9 +263,9 @@ class SemanticStructureSchema:
             "h2_content_analysis": h2_content_analysis,
             "content_type_diversity": list(content_type_diversity),
             "content_type_diversity_score": round(content_type_score, 3),
-            "content_type_benchmark": "Top pages include 3-5 content types (definition, comparison, procedural, FAQ, list)",
+            "content_type_benchmark": "(General industry guidance, unverified): Top pages include 3-5 content types (definition, comparison, procedural, FAQ, list)",
             "word_count_per_h2_section": round(word_count_per_section, 0),
-            "word_count_per_section_benchmark": "Optimal: 250-400 words per H2 section",
+            "word_count_per_section_benchmark": "(General industry guidance, unverified): Optimal 250-400 words per H2 section",
             "semantic_depth_score": round(depth_score, 3),
             "schema_coverage_analysis": schema_analysis,
             "structure_issues": structure_issues,
@@ -172,7 +277,7 @@ class SemanticStructureSchema:
                 "CRITICAL - Major restructuring required"
             ),
             "entity_in_headings": sum(1 for h in h2s if primary_entity.lower() in h.lower()) if primary_entity else 0,
-            "entity_heading_benchmark": f"Primary entity should appear in H1 and 3+ H2 headings",
+            "entity_heading_benchmark": f"(General industry guidance, unverified): Primary entity should appear in H1 and 3+ H2 headings",
             "specific_recommendations": self._generate_structure_url_recommendations(url_data, seed_phrase, primary_entity)
         }
 
@@ -239,14 +344,14 @@ class SemanticStructureSchema:
             recs.append({
                 "priority": "HIGH",
                 "action": f"Add primary entity '{primary_entity}' to H1 and at least 2 H2 headings",
-                "detail": "Entity not found in any heading. Include in H1 and 30%+ of H2 headings for topical authority."
+                "detail": "Entity not found in any heading. (General industry guidance, unverified): Include in H1 and 30%+ of H2 headings for topical authority."
             })
 
         if len(h2s) < 8:
             recs.append({
                 "priority": "HIGH",
                 "action": f"Add {8 - len(h2s)} more H2 sections to reach competitive depth",
-                "detail": f"Only {len(h2s)} H2s found. Top-ranking pages average 8-12 H2 sections with 250-400 words each."
+                "detail": f"Only {len(h2s)} H2s found. (General industry guidance, unverified): Top-ranking pages average 8-12 H2 sections with 250-400 words each."
             })
 
         question_headings = [h for h in h2s if "?" in h]
@@ -261,7 +366,7 @@ class SemanticStructureSchema:
             recs.append({
                 "priority": "HIGH",
                 "action": "Implement TechArticle, FAQPage, and HowTo JSON-LD schema",
-                "detail": "No schema detected. Pages with valid schema see 25-40% higher rich snippet rates."
+                "detail": "No schema detected. (General industry guidance, unverified): pages with valid schema see 25-40% higher rich snippet rates."
             })
 
         word_count_per_h2 = word_count / max(1, len(h2s))
@@ -583,37 +688,39 @@ class SemanticStructureSchema:
             sections.append(section)
         return sections
 
-    def _generate_schema_payloads(self, seed: str, entity: str, entity_graph: Dict, outline: Dict) -> Dict[str, Any]:
+    def _generate_schema_payloads(self, seed: str, entity: str, entity_graph: Dict, outline: Dict, inputs: Dict = None) -> Dict[str, Any]:
         """Generate comprehensive JSON-LD schema payloads."""
+        inputs = inputs or {}
+        author = inputs.get("author", {})
+        publisher = inputs.get("publisher", {})
+        author_name = (author.get("name") or "").strip()
+        author_title = (author.get("title") or "").strip()
+        publisher_name = (publisher.get("name") or "").strip()
+        logo_url = (publisher.get("logo_url") or "").strip()
+
+        author_obj = {
+            "@type": "Person",
+            "name": author_name,
+            "knowsAbout": entity,
+        }
+        if author_title:
+            author_obj["jobTitle"] = author_title
+        if author.get("social_profiles"):
+            author_obj["sameAs"] = author.get("social_profiles", [])
+
+        publisher_obj = {"@type": "Organization", "name": publisher_name}
+        if logo_url:
+            publisher_obj["logo"] = {"@type": "ImageObject", "url": logo_url}
+
         article_schema = {
             "@context": "https://schema.org",
             "@type": "TechArticle",
             "headline": outline["h1"]["title"],
-            "description": f"Comprehensive guide to {entity}: features, benefits, comparisons, and implementation best practices for 2026.",
-            "author": {
-                "@type": "Person",
-                "name": "[Author Name]",
-                "jobTitle": "[Author Title]",
-                "sameAs": [
-                    "[LinkedIn URL]",
-                    "[Twitter URL]"
-                ]
-            },
-            "publisher": {
-                "@type": "Organization",
-                "name": "[Publisher Name]",
-                "logo": {
-                    "@type": "ImageObject",
-                    "url": "[Logo URL]"
-                }
-            },
-            "datePublished": "[YYYY-MM-DD]",
-            "dateModified": "[YYYY-MM-DD]",
             "about": [
                 {
                     "@type": "Thing",
                     "name": entity,
-                    "sameAs": entity_graph.get("knowledge_graph_uris", {}).get("wikidata", "")
+                    "sameAs": entity_graph.get("knowledge_graph_uris", {}).get("sameAs_candidates", [])
                 }
             ],
             "mentions": [
@@ -629,92 +736,29 @@ class SemanticStructureSchema:
             },
             "keywords": seed,
             "articleSection": "Technology",
-            "wordCount": outline.get("structural_metrics", {}).get("total_estimated_word_count", 2500),
             "isAccessibleForFree": True,
             "inLanguage": "en-US"
         }
+        if author_name:
+            article_schema["author"] = author_obj
+        if publisher_name:
+            article_schema["publisher"] = publisher_obj
 
         faq_schema = {
             "@context": "https://schema.org",
             "@type": "FAQPage",
-            "mainEntity": [
-                {
-                    "@type": "Question",
-                    "name": f"What is {entity}?",
-                    "acceptedAnswer": {
-                        "@type": "Answer",
-                        "text": f"{entity} is a [detailed definition covering primary function, key features, and target users]."
-                    }
-                },
-                {
-                    "@type": "Question",
-                    "name": f"How much does {entity} cost?",
-                    "acceptedAnswer": {
-                        "@type": "Answer",
-                        "text": f"{entity} pricing varies by vendor and plan. Typical ranges include [price tiers]."
-                    }
-                },
-                {
-                    "@type": "Question",
-                    "name": f"What are the best {entity} alternatives?",
-                    "acceptedAnswer": {
-                        "@type": "Answer",
-                        "text": f"Top {entity} alternatives include [Alternative 1], [Alternative 2], and [Alternative 3], each suited for different use cases."
-                    }
-                },
-                {
-                    "@type": "Question",
-                    "name": f"How do you implement {entity}?",
-                    "acceptedAnswer": {
-                        "@type": "Answer",
-                        "text": f"Implementing {entity} involves [step 1], [step 2], and [step 3]. Most organizations complete deployment within [timeframe]."
-                    }
-                },
-                {
-                    "@type": "Question",
-                    "name": f"Is {entity} worth the investment?",
-                    "acceptedAnswer": {
-                        "@type": "Answer",
-                        "text": f"Yes, {entity} delivers [ROI metric] according to [source]. Organizations report [benefit] within [timeframe]."
-                    }
-                }
-            ]
+            "status": "NO_FAQ_QUESTIONS",
+            "message": "FAQ schema is only generated from real questions found in the People-Also-Ask analysis or outline FAQ sections."
         }
 
         howto_schema = {
             "@context": "https://schema.org",
             "@type": "HowTo",
-            "name": f"How to Implement {entity}",
-            "description": f"Step-by-step guide to implementing {entity} for your organization",
-            "totalTime": "P7D",
-            "step": [
-                {
-                    "@type": "HowToStep",
-                    "name": "Assessment and Planning",
-                    "text": "Evaluate your current infrastructure and define requirements for implementation.",
-                    "position": 1
-                },
-                {
-                    "@type": "HowToStep",
-                    "name": "Configuration and Setup",
-                    "text": "Configure the solution according to your organization's specific requirements.",
-                    "position": 2
-                },
-                {
-                    "@type": "HowToStep",
-                    "name": "Integration and Testing",
-                    "text": "Integrate with existing systems and run comprehensive testing protocols.",
-                    "position": 3
-                },
-                {
-                    "@type": "HowToStep",
-                    "name": "Go-Live and Optimization",
-                    "text": "Deploy to production and establish ongoing monitoring and optimization processes.",
-                    "position": 4
-                }
-            ]
+            "status": "NO_STEPS",
+            "message": "HowTo schema is only generated from real implementation steps found in the outline."
         }
 
+        brand_website = inputs.get("brand_website", "").strip().rstrip("/")
         breadcrumb_schema = {
             "@context": "https://schema.org",
             "@type": "BreadcrumbList",
@@ -723,19 +767,19 @@ class SemanticStructureSchema:
                     "@type": "ListItem",
                     "position": 1,
                     "name": "Home",
-                    "item": "[Homepage URL]"
+                    "item": brand_website or ""
                 },
                 {
                     "@type": "ListItem",
                     "position": 2,
                     "name": "Resources",
-                    "item": "[Resources URL]"
+                    "item": (brand_website + "/resources") if brand_website else ""
                 },
                 {
                     "@type": "ListItem",
                     "position": 3,
                     "name": entity,
-                    "item": "[Current Page URL]"
+                    "item": inputs.get("url", brand_website) or ""
                 }
             ]
         }
@@ -924,46 +968,51 @@ class SemanticStructureSchema:
                 "total_h3_count": metrics.get("total_h3_count", 0),
                 "estimated_word_count": metrics.get("total_estimated_word_count", 0),
                 "direct_answer_blocks": metrics.get("direct_answer_blocks", 0),
-                "benchmark": "Top-ranking content averages 10-15 H2 sections, 20-30 H3 subsections, and 3000-5000 words",
+                "benchmark": "(General industry guidance, unverified): Top-ranking content averages 10-15 H2 sections, 20-30 H3 subsections, and 3000-5000 words",
                 "statistical_range": f"Current structure: {metrics.get('total_h2_count', 0)} H2s, {metrics.get('total_h3_count', 0)} H3s, ~{metrics.get('total_estimated_word_count', 0)} words",
                 "expert_recommendation": "Aim for 10+ H2 sections with 2-3 H3 subsections each for comprehensive topical coverage",
                 "common_mistakes": ["Too few H2 sections (less than 8)", "Missing H3 subsections for depth", "Word count under 2500 for competitive queries"],
-                "success_metrics": ["10+ H2 sections", "25+ H3 subsections", "3000+ words", "8+ direct answer blocks"]
+                "success_metrics": ["10+ H2 sections", "25+ H3 subsections", "3000+ words", "8+ direct answer blocks"],
+                "data_origin": "unverified_industry_heuristic - not measured for this page"
             },
             "schema_implementation_insights": {
                 "total_schemas": len(schemas.get("schemas", {})),
                 "validation_status": schemas.get("validation", {}),
-                "benchmark": "Pages with valid TechArticle, FAQPage, and HowTo schema see 25-40% higher rich snippet appearance rates",
-                "statistical_range": f"Schemas generated: {len(schemas.get('schemas', {}))} (recommended: 4 types)",
+                "benchmark": "(General industry guidance, unverified): Pages with valid TechArticle, FAQPage, and HowTo schema see 25-40% higher rich snippet appearance rates",
+                "statistical_range": f"Schemas generated: {len(schemas.get('schemas', {}))} (unverified heuristic recommendation: 4 types)",
                 "expert_recommendation": "Implement all 4 schema types (TechArticle, FAQPage, HowTo, BreadcrumbList) for maximum structured data coverage",
                 "common_mistakes": ["Schema content not matching page content", "Missing dateModified field", "Invalid JSON-LD syntax", "Inconsistent @id references"],
-                "success_metrics": ["0 schema validation errors", "Rich results appearing in SERP", "FAQPage schema triggering for question queries"]
+                "success_metrics": ["0 schema validation errors", "Rich results appearing in SERP", "FAQPage schema triggering for question queries"],
+                "data_origin": "unverified_industry_heuristic - not measured for this page"
             },
             "heading_optimization_insights": {
                 "average_optimization_score": heading_opt.get("average_optimization_score", 0),
                 "headings_needing_work": len(heading_opt.get("headings_needing_work", [])),
-                "benchmark": "Top-optimized headings have keyword coverage > 60%, contain numbers, and are under 70 characters",
-                "statistical_range": f"Average heading score: {heading_opt.get('average_optimization_score', 0)*100:.0f}% (target: 60%+)",
+                "benchmark": "(General industry guidance, unverified): Top-optimized headings have keyword coverage > 60%, contain numbers, and are under 70 characters",
+                "statistical_range": f"Average heading score: {heading_opt.get('average_optimization_score', 0)*100:.0f}% (unverified heuristic target: 60%+)",
                 "expert_recommendation": "Add target keywords, numbers, or question marks to headings scoring below 40% optimization",
                 "common_mistakes": ["Headings too long (70+ characters)", "Missing target keywords in H2 titles", "Not using question format for FAQ sections"],
-                "success_metrics": ["Average heading score > 60%", "0 headings below 40% optimization", "All H2s under 70 characters"]
+                "success_metrics": ["Average heading score > 60%", "0 headings below 40% optimization", "All H2s under 70 characters"],
+                "data_origin": "unverified_industry_heuristic - not measured for this page"
             },
             "direct_answer_blocks_insights": {
                 "total_blocks": len(direct_answer_blocks),
                 "block_types": [b.get("extraction_format", "unknown") for b in direct_answer_blocks],
-                "benchmark": "AI Overview extracts 40-60 word paragraphs; pages with 5+ direct answer blocks have 3x higher citation probability",
-                "statistical_range": f"Direct answer blocks: {len(direct_answer_blocks)} (target: 5+)",
+                "benchmark": "(General industry guidance, unverified): AI Overview extracts 40-60 word paragraphs; pages with 5+ direct answer blocks have 3x higher citation probability",
+                "statistical_range": f"Direct answer blocks: {len(direct_answer_blocks)} (unverified heuristic target: 5+)",
                 "expert_recommendation": "Each block must be 40-60 words, start with a definition or key fact, and include at least one statistic or source",
                 "common_mistakes": ["Answers exceeding 60 words", "Hedging language instead of direct statements", "Missing source attribution in answer blocks"],
-                "success_metrics": ["5+ direct answer blocks", "AI Overview extraction within 30 days", "Featured snippet capture for definitional queries"]
+                "success_metrics": ["5+ direct answer blocks", "AI Overview extraction within 30 days", "Featured snippet capture for definitional queries"],
+                "data_origin": "unverified_industry_heuristic - not measured for this page"
             },
             "content_flow_insights": {
                 "opening_strategy": outline.get("h1", {}).get("content_type", "definition"),
                 "content_type_diversity": metrics.get("content_type_diversity", 0),
-                "benchmark": "Optimal content flow includes definition, benefits, comparison, procedural, and FAQ content types",
-                "statistical_range": f"Content type diversity: {metrics.get('content_type_diversity', 0)} types (target: 5+)",
+                "benchmark": "(General industry guidance, unverified): Optimal content flow includes definition, benefits, comparison, procedural, and FAQ content types",
+                "statistical_range": f"Content type diversity: {metrics.get('content_type_diversity', 0)} types (unverified heuristic target: 5+)",
                 "expert_recommendation": "Include at least 5 distinct content types (definition, benefits, comparison, procedural, FAQ) for comprehensive coverage",
                 "common_mistakes": ["Monotonous content type throughout", "Missing comparison sections for decision-stage queries", "No FAQ section for PAA capture"],
-                "success_metrics": ["5+ content types", "Balanced funnel coverage", "Featured snippet capture across content types"]
+                "success_metrics": ["5+ content types", "Balanced funnel coverage", "Featured snippet capture across content types"],
+                "data_origin": "unverified_industry_heuristic - not measured for this page"
             }
         }

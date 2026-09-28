@@ -1,3 +1,6 @@
 flask>=3.0.0
 reportlab>=4.0.0
 requests>=2.31.0
+pytest>=8.0.0
+# Prod serve (pick one): gunicorn>=22.0.0  # linux | waitress>=3.0.0  # windows
+# Optional upgrades: beautifulsoup4 (richer SERP parsing), numpy+scikit-learn (MiniLM-class embeddings)

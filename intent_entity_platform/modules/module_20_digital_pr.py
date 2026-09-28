@@ -86,42 +86,45 @@ class DigitalPREngine:
                     "sameas_schema_impact": "Pages with sameAs links see 15-25% higher Knowledge Panel visibility",
                     "knowledge_panel_trigger_rate": "Consistent entity signals across 5+ authoritative sources trigger panel creation",
                     "entity_authority_score_range": "Low: 0-3 sources; Medium: 4-8 sources; High: 9+ authoritative sources",
-                    "typical_time_to_knowledge_panel": "3-6 months with consistent cross-platform entity signals"
+                    "typical_time_to_knowledge_panel": "3-6 months with consistent cross-platform entity signals",
+                    "data_origin": "unverified_industry_heuristic - not measured for this page"
                 },
                 "author_trust_benchmarks": {
                     "expert_tier_requirements": "3+ social profiles + credentials + 10+ publications",
                     "authoritative_tier_requirements": "2+ verified social profiles + 5+ published articles",
                     "linkedin_verification_impact": "Strongest single author E-E-A-T signal for Google's helpful content system",
                     "google_scholar_impact": "Significant boost for YMYL and research-heavy content types",
-                    "consistent_author_name_impact": "20-30% improvement in author entity recognition with name consistency"
+                    "consistent_author_name_impact": "20-30% improvement in author entity recognition with name consistency",
+                    "data_origin": "unverified_industry_heuristic - not measured for this page"
                 },
                 "digital_pr_benchmarks": {
                     "original_data_pitch_success_rate": "15-25% for truly original research; 5-10% for commentary",
                     "haro_response_success_rate": "5-15% of responses result in published mentions",
                     "link_earning_from_pr": "Average 2-5 high-authority links per successful PR placement",
                     "data_visualization_share_rate": "Visual content gets 3x more shares and 2x more backlinks than text-only",
-                    "guest_post_authority_value": "Links from DA 60+ publications carry 3-5x more authority than average backlinks"
+                    "guest_post_authority_value": "Links from DA 60+ publications carry 3-5x more authority than average backlinks",
+                    "data_origin": "unverified_industry_heuristic - not measured for this page"
                 },
                 "expert_recommendations": [
-                    "Build entity authority systematically: Wikidata entry first, then cross-platform profile consistency",
-                    "Publish original research data that competitors cannot replicate - this is the strongest PR angle",
-                    "Create an author entity footprint across LinkedIn, Google Scholar, Twitter, and industry publications",
-                    "Use entity linking strategy to connect on-page and off-page signals for Knowledge Graph alignment",
-                    "Monitor Google Knowledge Panel monthly and update entity information as it evolves"
+                    "(General industry guidance, unverified): Build entity authority systematically - Wikidata entry first, then cross-platform profile consistency",
+                    "(General industry guidance, unverified): Publish original research data that competitors cannot replicate - often the strongest PR angle",
+                    "(General industry guidance, unverified): Create an author entity footprint across LinkedIn, Google Scholar, Twitter, and industry publications",
+                    "(General industry guidance, unverified): Use entity linking strategy to connect on-page and off-page signals for Knowledge Graph alignment",
+                    "(General industry guidance, unverified): Monitor Google Knowledge Panel monthly and update entity information as it evolves"
                 ],
                 "common_mistakes": [
-                    "Inconsistent author name across platforms (John Smith vs. J. Smith vs. Jonathan Smith) breaks entity recognition",
-                    "Forgetting to add sameAs schema links means Knowledge Graph cannot connect your content to verified entities",
-                    "Pitching PR without original data or unique insight - generic commentary gets ignored by journalists",
-                    "Ignoring unlinked brand mentions - reach out and request backlinks from these mentions",
-                    "Not building author entity signals before publishing YMYL content - trust must be established first"
+                    "(General industry guidance, unverified): Inconsistent author name across platforms (John Smith vs. J. Smith vs. Jonathan Smith) can break entity recognition",
+                    "(General industry guidance, unverified): Forgetting to add sameAs schema links means Knowledge Graph cannot connect your content to verified entities",
+                    "(General industry guidance, unverified): Pitching PR without original data or unique insight - generic commentary often gets ignored by journalists",
+                    "(General industry guidance, unverified): Ignoring unlinked brand mentions - reach out and request backlinks from these mentions",
+                    "(General industry guidance, unverified): Not building author entity signals before publishing YMYL content - trust should be established first"
                 ],
                 "success_metrics": [
-                    "Track Knowledge Panel appearance for primary entity (target: within 6 months of entity building)",
-                    "Monitor author search visibility for '[Author Name] [Expertise]' queries",
-                    "Measure backlink acquisition rate from digital PR efforts (target: 5+ per month)",
-                    "Track brand mention growth across web (linked and unlinked) month-over-month",
-                    "Monitor Google Knowledge Graph API entity score and data completeness"
+                    "(General industry guidance, unverified): Track Knowledge Panel appearance for primary entity (heuristic target: within 6 months of entity building)",
+                    "(General industry guidance, unverified): Monitor author search visibility for the primary author's name and expertise queries",
+                    "(General industry guidance, unverified): Measure backlink acquisition rate from digital PR efforts (heuristic target: 5+ per month)",
+                    "(General industry guidance, unverified): Track brand mention growth across web (linked and unlinked) month-over-month",
+                    "(General industry guidance, unverified): Monitor Google Knowledge Graph API entity score and data completeness"
                 ]
             }
         }
@@ -239,7 +242,8 @@ class DigitalPREngine:
                 "Academic/research institutions",
                 "Government/organizational websites",
                 "High-authority directories and listings"
-            ]
+            ],
+            "data_origin": "unverified_industry_heuristic - not measured for this page"
         }
 
         return {
@@ -299,21 +303,40 @@ class DigitalPREngine:
 
     def _align_knowledge_graph(self, entity: str, inputs: Dict) -> Dict[str, Any]:
         """Align entity with Knowledge Graph URIs using REAL Wikidata lookups."""
-        normalized = entity.lower().replace(" ", "_")
         wd = search_wikidata(entity)
         wd_results = wd.get("results", [])
         wd_ok = wd.get("ok", False)
         wikidata_url = wd_results[0]["url"] if wd_results else None
-        wikipedia_url = f"https://en.wikipedia.org/wiki/{normalized}" if wd_results else None
+        wikidata_id = wd_results[0]["id"] if wd_results else None
+
+        same_as = []
+        if wikidata_url:
+            same_as.append(wikidata_url)
+        if wikidata_id:
+            try:
+                from ..utils.web_data import _open as wd_open, _read_body as wd_read
+                import json as _json
+                wd_api = ("https://www.wikidata.org/w/api.php?action=wbgetentities&ids="
+                          + urllib.parse.quote(wikidata_id)
+                          + "&props=sitelinks&sitefilter=enwiki&format=json")
+                resp = wd_open(wd_api, timeout=15, headers={"Accept": "application/json"})
+                if resp is not None:
+                    data = _json.loads(wd_read(resp))
+                    enwiki = (data.get("entities", {}).get(wikidata_id, {})
+                              .get("sitelinks", {}).get("enwiki", {}).get("title", ""))
+                    if enwiki:
+                        same_as.append("https://en.wikipedia.org/wiki/" + enwiki.replace(" ", "_"))
+            except Exception:
+                pass
 
         return {
             "entity_name": entity,
             "knowledge_graph_uris": {
-                "wikidata": wikidata_url or f"https://www.wikidata.org/wiki/Special:Search?search={urllib.parse.quote(entity)}",
-                "google_knowledge_graph": f"https://kgsearch.googleapis.com/v1/entities:search?query={entity.replace(' ', '+')}&key=[API_KEY_REQUIRED]",
-                "dbpedia": f"https://dbpedia.org/page/{normalized}",
-                "freebase": f"https://freebase.com/m/{normalized}",
-                "wikipedia": wikipedia_url or f"https://en.wikipedia.org/wiki/{normalized}"
+                "wikidata": wikidata_url or "",
+                "wikidata_id": wikidata_id or "",
+                "sameAs_candidates": same_as,
+                "search_url": f"https://www.wikidata.org/wiki/Special:Search?search={urllib.parse.quote(entity)}",
+                "wikidata_verified": bool(wd_results)
             },
             "wikidata_lookup": {
                 "searched": wd_ok,
@@ -321,7 +344,8 @@ class DigitalPREngine:
                 "matched_entities": wd_results,
                 "exact_match": bool(wd_results)
             },
-            "sameAs_schema": ([wikidata_url] if wikidata_url else []) + ([wikipedia_url] if wikipedia_url else []),
+            "sameAs_schema": same_as,
+            "verification_note": "Only real verified Wikidata references are provided - no fabricated Knowledge Graph URIs",
             "entity_verification_steps": [
                 "Search for entity on Wikidata and verify entry exists",
                 "Check Google Knowledge Graph API for entity data",
@@ -375,34 +399,39 @@ class DigitalPREngine:
         """Identify PR opportunities from content + REAL live outlet discovery."""
         data_points = re.findall(r'\d+(?:\.\d+)?%', content)
         live_outlets = self._discover_live_outlets(entity)
+        live_outlet_names = live_outlets.get("outlet_names", []) or []
+        pitch_angles = [
+            {
+                "angle": "Original Research Data",
+                "pitch_summary": f"Share unique statistics and findings about {entity}",
+                "target_outlets": live_outlet_names[:6],
+                "pitch_template": f"Our analysis of {entity} reveals [key finding]. This data, based on [methodology], suggests [insight].",
+                "estimated_pickup_probability": "HIGH if data is truly original"
+            },
+            {
+                "angle": "Expert Commentary",
+                "pitch_summary": f"Position author as expert source for {entity} stories",
+                "target_outlets": ["Industry publications", "Business journals", "Trade media"],
+                "pitch_template": f"Our team's experience implementing {entity} for [clients/organizations] has shown [insight].",
+                "estimated_pickup_probability": "MODERATE - requires established credentials"
+            },
+            {
+                "angle": "Data Visualization Asset",
+                "pitch_summary": "Create shareable infographic with key findings",
+                "target_outlets": ["Social media", "Industry blogs", "Newsletter features"],
+                "pitch_template": "Visual summary of key findings designed for easy sharing and embedding.",
+                "estimated_pickup_probability": "(General industry guidance, unverified) HIGH - visual content gets 3x more shares"
+            }
+        ]
+        if not live_outlet_names:
+            pitch_angles[0]["target_outlets"] = []
+            pitch_angles[0]["outlet_discovery_note"] = "Live outlet discovery returned no real outlets covering this topic - no fabricated outlet names are suggested."
         return {
             "original_data_opportunities": len(data_points),
             "live_outlets_covering_topic": live_outlets.get("results", []),
             "live_outlet_search_status": "LIVE" if live_outlets.get("ok") else "UNAVAILABLE",
             "live_outlet_search_error": live_outlets.get("error"),
-            "pr_pitch_angles": [
-                {
-                    "angle": "Original Research Data",
-                    "pitch_summary": f"Share unique statistics and findings about {entity}",
-                    "target_outlets": (live_outlets.get("outlet_names", []) or ["TechCrunch", "VentureBeat", "ZDNet", "Forbes Technology"])[:6],
-                    "pitch_template": f"Our analysis of {entity} reveals [key finding]. This data, based on [methodology], suggests [insight].",
-                    "estimated_pickup_probability": "HIGH if data is truly original"
-                },
-                {
-                    "angle": "Expert Commentary",
-                    "pitch_summary": f"Position author as expert source for {entity} stories",
-                    "target_outlets": ["Industry publications", "Business journals", "Trade media"],
-                    "pitch_template": f"Our team's experience implementing {entity} for [clients/organizations] has shown [insight].",
-                    "estimated_pickup_probability": "MODERATE - requires established credentials"
-                },
-                {
-                    "angle": "Data Visualization Asset",
-                    "pitch_summary": "Create shareable infographic with key findings",
-                    "target_outlets": ["Social media", "Industry blogs", "Newsletter features"],
-                    "pitch_template": "Visual summary of key findings designed for easy sharing and embedding.",
-                    "estimated_pickup_probability": "HIGH - visual content gets 3x more shares"
-                }
-            ],
+            "pr_pitch_angles": pitch_angles,
             "link_earning_strategy": [
                 "Submit original data to industry research roundups",
                 "Offer expert quotes to journalist query services (Qwoted, HARO)",
@@ -456,7 +485,8 @@ class DigitalPREngine:
             "entity_link_graph": {
                 "internal_links": "Link to 3-5 related internal pages",
                 "external_links": "Link to 2-3 authoritative external sources",
-                "backlink_targets": "Earn links from 5+ authoritative domains"
+                "backlink_targets": "Earn links from 5+ authoritative domains",
+                "data_origin": "unverified_industry_heuristic - not measured for this page"
             }
         }
 

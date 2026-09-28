@@ -18,20 +18,37 @@ class EEATGapProfiler:
         self.module_name = "The Experience & Gap Profiler (E-E-A-T Engine)"
 
     def analyze(self, inputs: Dict[str, Any], serp_data: Dict, existing_content: Optional[str] = None) -> Dict[str, Any]:
-        """Full E-E-A-T and gap analysis pipeline."""
+        """Full E-E-A-T and gap analysis pipeline with REAL competitor data."""
         seed_phrase = inputs.get("seed_phrase", "")
         primary_entity = inputs.get("primary_entity", "")
         competitor_content = inputs.get("competitor_content", [])
         sme_assets = inputs.get("sme_assets", [])
         proprietary_data = inputs.get("proprietary_data", [])
         url_data = inputs.get("_url_data", None)
+        
+        # NEW: Use real competitor data from live fetches
+        real_competitor_pages = inputs.get("real_competitor_pages", [])
+        real_content_analysis = inputs.get("real_content_analysis", {})
+        real_competitor_entities = inputs.get("real_competitor_entities", {})
+        real_content_gaps = inputs.get("real_content_gaps", {})
+        
+        # Build enhanced competitor content from real data
+        enhanced_competitor_content = list(competitor_content)
+        for page in real_competitor_pages:
+            if page.get("fetch_success"):
+                enhanced_competitor_content.append(page.get("page_text", ""))
+                enhanced_competitor_content.extend(page.get("h2s", []))
+                enhanced_competitor_content.extend(page.get("h3s", []))
 
-        consensus_map = self._detect_consensus(seed_phrase, primary_entity, competitor_content)
-        information_gain = self._calculate_information_gaps(seed_phrase, primary_entity, competitor_content)
-        sme_placement = self._optimize_sme_placement(seed_phrase, primary_entity, sme_assets, competitor_content)
-        eeat_assessment = self._assess_eEat_signals(seed_phrase, primary_entity, competitor_content, sme_assets)
-        unique_value = self._identify_unique_value_propositions(competitor_content, proprietary_data, sme_assets)
-        content_differentiation = self._score_content_differentiation(seed_phrase, competitor_content, proprietary_data)
+        consensus_map = self._detect_consensus(seed_phrase, primary_entity, enhanced_competitor_content)
+        information_gain = self._calculate_information_gaps(seed_phrase, primary_entity, enhanced_competitor_content)
+        sme_placement = self._optimize_sme_placement(seed_phrase, primary_entity, sme_assets, enhanced_competitor_content)
+        eeat_assessment = self._assess_eEat_signals(seed_phrase, primary_entity, enhanced_competitor_content, sme_assets)
+        unique_value = self._identify_unique_value_propositions(enhanced_competitor_content, proprietary_data, sme_assets)
+        content_differentiation = self._score_content_differentiation(seed_phrase, enhanced_competitor_content, proprietary_data)
+        
+        # NEW: Analyze real competitor E-E-A-T signals
+        real_competitor_eeat = self._analyze_real_competitor_eeat(real_competitor_pages, real_content_analysis, real_competitor_entities, real_content_gaps)
 
         url_eeat_analysis = self._analyze_url_eeat(url_data, seed_phrase, primary_entity) if url_data else None
 
@@ -48,7 +65,10 @@ class EEATGapProfiler:
             "recommendations": self._generate_recommendations(consensus_map, information_gain, eeat_assessment, sme_placement),
             "implementation_steps": self._generate_implementation_steps(consensus_map, information_gain, sme_placement, eeat_assessment),
             "where_to_add": self._generate_where_to_add(sme_placement, information_gain),
-            "detailed_analysis": self._generate_detailed_analysis(consensus_map, information_gain, sme_placement, eeat_assessment, content_differentiation)
+            "detailed_analysis": self._generate_detailed_analysis(consensus_map, information_gain, sme_placement, eeat_assessment, content_differentiation),
+            "real_competitor_eeat_analysis": real_competitor_eeat,
+            "data_source": "real_time_competitor_analysis",
+            "competitors_analyzed": len([p for p in real_competitor_pages if p.get("fetch_success")])
         }
 
         if url_data and url_eeat_analysis:
@@ -57,6 +77,81 @@ class EEATGapProfiler:
             result["detailed_analysis"]["url_eeat_insights"] = url_eeat_analysis
 
         return result
+
+    def _analyze_real_competitor_eeat(self, competitor_pages: List[Dict], content_analysis: Dict, competitor_entities: Dict, content_gaps: Dict) -> Dict[str, Any]:
+        """Analyze real competitor E-E-A-T signals from live data."""
+        if not competitor_pages:
+            return {"error": "No competitor data available", "source": "N/A"}
+        
+        successful_pages = [p for p in competitor_pages if p.get("fetch_success")]
+        if not successful_pages:
+            return {"error": "No successful competitor fetches", "source": "N/A"}
+        
+        eeat_analysis = []
+        for page in competitor_pages:
+            if not page.get("fetch_success"):
+                continue
+            page_text = page.get("page_text", "")
+            
+            # Count E-E-A-T signals in real competitor content
+            author_signals = len(re.findall(r'(?:by|author|written by|contributor|editor)', page_text, re.IGNORECASE))
+            credential_signals = len(re.findall(r'(?:PhD|MD|MBA|certified|expert|specialist|years of experience|decade)', page_text, re.IGNORECASE))
+            citation_signals = len(re.findall(r'(?:according to|source:|cited by|based on|research by|study by|published by|report by)', page_text, re.IGNORECASE))
+            expertise_signals = len(re.findall(r'(?:industry|market|research|analysis|data|study|survey|benchmark|statistic)', page_text, re.IGNORECASE))
+            trust_signals = len(re.findall(r'(?:guarantee|warranty|secure|verified|certified|trusted|proven|tested)', page_text, re.IGNORECASE))
+            
+            eeat_analysis.append({
+                "url": page.get("url", ""),
+                "position": page.get("position", 0),
+                "eeat_signals": {
+                    "author_signals": author_signals,
+                    "credential_signals": credential_signals,
+                    "citation_signals": citation_signals,
+                    "expertise_signals": expertise_signals,
+                    "trust_signals": trust_signals,
+                    "total_signals": author_signals + credential_signals + citation_signals + expertise_signals + trust_signals
+                },
+                "has_schema": page.get("has_schema", False),
+                "word_count": page.get("word_count", 0)
+            })
+        
+        # Calculate E-E-A-T benchmarks
+        avg_author_signals = sum(c["eeat_signals"]["author_signals"] for c in eeat_analysis) / len(eeat_analysis) if eeat_analysis else 0
+        avg_credential_signals = sum(c["eeat_signals"]["credential_signals"] for c in eeat_analysis) / len(eeat_analysis) if eeat_analysis else 0
+        avg_citation_signals = sum(c["eeat_signals"]["citation_signals"] for c in eeat_analysis) / len(eeat_analysis) if eeat_analysis else 0
+        avg_expertise_signals = sum(c["eeat_signals"]["expertise_signals"] for c in eeat_analysis) / len(eeat_analysis) if eeat_analysis else 0
+        avg_trust_signals = sum(c["eeat_signals"]["trust_signals"] for c in eeat_analysis) / len(eeat_analysis) if eeat_analysis else 0
+        
+        # Get content gaps from real data
+        gaps = content_gaps.get("content_gaps", [])
+        coverage = content_gaps.get("coverage_percentage", 0)
+        
+        return {
+            "competitors_analyzed": len(eeat_analysis),
+            "eeat_details": eeat_analysis,
+            "benchmarks_from_real_data": {
+                "avg_author_signals": round(avg_author_signals, 1),
+                "avg_credential_signals": round(avg_credential_signals, 1),
+                "avg_citation_signals": round(avg_citation_signals, 1),
+                "avg_expertise_signals": round(avg_expertise_signals, 1),
+                "avg_trust_signals": round(avg_trust_signals, 1)
+            },
+            "content_gaps_from_real_competitors": {
+                "total_gaps_identified": len(gaps),
+                "coverage_percentage": coverage,
+                "top_missing_topics": gaps[:15],
+                "recommendation": f"Create content for {len(gaps)} topics competitors cover that you don't"
+            },
+            "recommendations": [
+                f"Add {max(0, 3 - int(avg_author_signals))} author attribution signals (competitors average {avg_author_signals:.1f})",
+                f"Add {max(0, 5 - int(avg_credential_signals))} credential signals (competitors average {avg_credential_signals:.1f})",
+                f"Add {max(0, 5 - int(avg_citation_signals))} citation signals (competitors average {avg_citation_signals:.1f})",
+                f"Add {max(0, 8 - int(avg_expertise_signals))} expertise signals (competitors average {avg_expertise_signals:.1f})",
+                f"Add {max(0, 3 - int(avg_trust_signals))} trust signals (competitors average {avg_trust_signals:.1f})",
+                f"Create content for {len(gaps)} missing topics identified from competitor analysis"
+            ],
+            "data_source": "live_competitor_page_analysis"
+        }
 
     def _analyze_url_eeat(self, url_data: Dict, seed_phrase: str, primary_entity: str) -> Dict[str, Any]:
         """Deep analysis of actual URL content for E-E-A-T signals."""
@@ -182,27 +277,27 @@ class EEATGapProfiler:
             ),
             "signal_counts": {
                 "first_person_references": first_person_count,
-                "first_person_benchmark": "5-10 first-person references per article",
+                "first_person_benchmark": "(General industry guidance, unverified): 5-10 first-person references per article",
                 "specific_results": len(specific_results),
-                "specific_results_benchmark": "3+ measurable outcomes per article",
+                "specific_results_benchmark": "(General industry guidance, unverified): 3+ measurable outcomes per article",
                 "case_studies": case_study_count,
-                "case_study_benchmark": "1-2 case studies with measurable outcomes",
+                "case_study_benchmark": "(General industry guidance, unverified): 1-2 case studies with measurable outcomes",
                 "personal_experience_statements": len(personal_experience),
                 "technical_terms": len(technical_terms),
-                "technical_term_benchmark": "10-20 technical terms for industry content",
+                "technical_term_benchmark": "(General industry guidance, unverified): 10-20 technical terms for industry content",
                 "research_citations": len(research_citations),
-                "research_citation_benchmark": "3+ citations to authoritative sources",
+                "research_citation_benchmark": "(General industry guidance, unverified): 3+ citations to authoritative sources",
                 "detailed_explanations": len(detailed_explanations),
                 "process_descriptions": len(process_descriptions),
                 "authority_mentions": len(authority_mentions),
                 "external_citations": len(external_citations),
-                "external_citation_benchmark": "5+ external citations per article",
+                "external_citation_benchmark": "(General industry guidance, unverified): 5+ external citations per article",
                 "brand_mentions": len(brand_mentions),
                 "data_transparency_signals": len(data_transparency),
                 "date_references": len(date_references),
                 "author_credentials": len(author_credentials),
                 "expert_quotes": len(expert_quotes),
-                "expert_quote_benchmark": "2-3 named expert quotes per article"
+                "expert_quote_benchmark": "(General industry guidance, unverified): 2-3 named expert quotes per article"
             },
             "weakest_signal": min(
                 {"experience": experience_score, "expertise": expertise_score, "authoritativeness": authoritativeness_score, "trustworthiness": trustworthiness_score},
@@ -806,51 +901,56 @@ class EEATGapProfiler:
                 "consensus_score": consensus.get("consensus_score", 0),
                 "total_competitors_analyzed": consensus.get("total_competitors_analyzed", 0),
                 "differentiation_opportunities": consensus.get("differentiation_opportunities", 0),
-                "benchmark": "Pages matching 70-80% of competitor consensus points while adding 20-30% unique value achieve highest rankings",
-                "statistical_range": f"Consensus coverage: {consensus.get('consensus_score', 0)*100:.0f}% (target: match 70-80%)",
+                "benchmark": "(General industry guidance, unverified): Pages matching 70-80% of competitor consensus points while adding 20-30% unique value achieve highest rankings",
+                "statistical_range": f"Consensus coverage: {consensus.get('consensus_score', 0)*100:.0f}% (unverified heuristic target: match 70-80%)",
                 "expert_recommendation": "Match all consensus points for baseline credibility, then differentiate with unique data and expert perspectives",
                 "common_mistakes": ["Ignoring consensus points and losing baseline trust", "Only copying competitors without adding unique value", "Missing key consensus topics entirely"],
-                "success_metrics": ["Consensus coverage > 75%", "20-30% unique differentiating content", "E-E-A-T score > 0.7"]
+                "success_metrics": ["Consensus coverage > 75%", "20-30% unique differentiating content", "E-E-A-T score > 0.7"],
+                "data_origin": "unverified_industry_heuristic - not measured for this page"
             },
             "information_gain_insights": {
                 "total_gaps": info_gain.get("total_gaps", 0),
                 "high_priority_gaps": len(info_gain.get("high_priority_gaps", [])),
                 "gain_potential": info_gain.get("information_gain_potential", 0),
-                "benchmark": "Content with 3+ unique information gaps filled achieves 40-60% higher engagement than competitor average",
-                "statistical_range": f"Information gain potential: {info_gain.get('information_gain_potential', 0)*100:.0f}% (target: 50%+)",
+                "benchmark": "(General industry guidance, unverified): Content with 3+ unique information gaps filled achieves 40-60% higher engagement than competitor average",
+                "statistical_range": f"Information gain potential: {info_gain.get('information_gain_potential', 0)*100:.0f}% (unverified heuristic target: 50%+)",
                 "expert_recommendation": "Address HIGH opportunity gaps first, then differentiate with unique opportunities like original research",
                 "common_mistakes": ["Filling all gaps equally instead of prioritizing HIGH opportunities", "Missing original research opportunities", "Not leveraging proprietary data for differentiation"],
-                "success_metrics": ["3+ HIGH priority gaps filled", "Original research published", "Unique value propositions > 3"]
+                "success_metrics": ["3+ HIGH priority gaps filled", "Original research published", "Unique value propositions > 3"],
+                "data_origin": "unverified_industry_heuristic - not measured for this page"
             },
             "sme_placement_insights": {
                 "sme_count": sme_placement.get("sme_count", 0),
                 "sections_covered": sme_placement.get("total_sections_covered", 0),
                 "eeat_boost_estimate": sme_placement.get("eeat_boost_estimate", 0),
-                "benchmark": "Content with 3-5 named expert quotes sees 30-50% improvement in E-E-A-T signals and trustworthiness",
-                "statistical_range": f"SME boost estimate: +{sme_placement.get('eeat_boost_estimate', 0)*100:.0f}% E-E-A-T improvement (target: 25%+)",
+                "benchmark": "(General industry guidance, unverified): Content with 3-5 named expert quotes sees 30-50% improvement in E-E-A-T signals and trustworthiness",
+                "statistical_range": f"SME boost estimate: +{sme_placement.get('eeat_boost_estimate', 0)*100:.0f}% E-E-A-T improvement (unverified heuristic target: 25%+)",
                 "expert_recommendation": "Place SME quotes in Definition, Benefits, Implementation, and Expert Insights sections for maximum impact",
                 "common_mistakes": ["Using generic expert quotes without credentials", "Placing all quotes in one section", "Missing LinkedIn/profile verification links"],
-                "success_metrics": ["3+ verified expert quotes", "Expert quotes in 4+ sections", "E-E-A-T boost > 20%"]
+                "success_metrics": ["3+ verified expert quotes", "Expert quotes in 4+ sections", "E-E-A-T boost > 20%"],
+                "data_origin": "unverified_industry_heuristic - not measured for this page"
             },
             "eeat_assessment_insights": {
                 "overall_score": eeat.get("overall_eEat_score", 0),
                 "eeat_tier": eeat.get("eeat_tier", "UNKNOWN"),
                 "weakest_signal": eeat.get("weakest_signal", "unknown"),
                 "strongest_signal": eeat.get("strongest_signal", "unknown"),
-                "benchmark": "Top 5% content scores 0.8+ on E-E-A-T; average is 0.4-0.6; below 0.2 needs critical improvement",
+                "benchmark": "(General industry guidance, unverified): Top 5% content scores 0.8+ on E-E-A-T; average is 0.4-0.6; below 0.2 needs critical improvement",
                 "statistical_range": f"Current E-E-A-T: {eeat.get('overall_eEat_score', 0)*100:.0f}% ({eeat.get('eeat_tier', 'UNKNOWN')})",
                 "expert_recommendation": f"Focus on improving {eeat.get('weakest_signal', 'unknown')} signals - currently the lowest scoring component",
                 "common_mistakes": ["Ignoring the weakest E-E-A-T signal", "Adding credentials without expertise evidence", "Missing source attributions for all claims"],
-                "success_metrics": ["E-E-A-T score > 0.7", "All 4 signals above 0.5", "No signal below 0.3", "Tier upgrade within 90 days"]
+                "success_metrics": ["E-E-A-T score > 0.7", "All 4 signals above 0.5", "No signal below 0.3", "Tier upgrade within 90 days"],
+                "data_origin": "unverified_industry_heuristic - not measured for this page"
             },
             "content_differentiation_insights": {
                 "differentiation_score": content_differentiation.get("differentiation_score", 0),
                 "differentiation_tier": content_differentiation.get("differentiation_tier", "UNKNOWN"),
                 "keyword_saturation": content_differentiation.get("keyword_saturation", 0),
-                "benchmark": "Highly differentiated content (>0.7 score) achieves 50-80% higher engagement and backlink rates",
+                "benchmark": "(General industry guidance, unverified): Highly differentiated content (>0.7 score) achieves 50-80% higher engagement and backlink rates",
                 "statistical_range": f"Differentiation score: {content_differentiation.get('differentiation_score', 0)*100:.0f}% ({content_differentiation.get('differentiation_tier', 'UNKNOWN')})",
                 "expert_recommendation": "Add proprietary data, original research, and interactive elements to push differentiation above 70%",
                 "common_mistakes": ["Producing content identical to competitors", "Ignoring proprietary data opportunities", "Missing interactive content elements"],
-                "success_metrics": ["Differentiation score > 0.7", "Backlink growth > 25%", "Unique visitor increase > 30%"]
+                "success_metrics": ["Differentiation score > 0.7", "Backlink growth > 25%", "Unique visitor increase > 30%"],
+                "data_origin": "unverified_industry_heuristic - not measured for this page"
             }
         }

@@ -94,6 +94,7 @@ class SchemaPayloadGenerator:
             ],
             "detailed_analysis": {
                 "industry_benchmarks": {
+                    "data_origin": "unverified_industry_heuristic - not measured for this page",
                     "schema_adoption_rate": "72% of top-ranking pages use structured data markup",
                     "rich_results_eligibility": "Pages with schema are 35% more likely to appear in rich results",
                     "faq_schema_impact": "FAQ schema increases AI Overview citation probability by 25%",
@@ -101,6 +102,7 @@ class SchemaPayloadGenerator:
                     "validation_error_rate": "Average website has 2-4 schema validation errors"
                 },
                 "statistical_ranges": {
+                    "data_origin": "unverified_industry_heuristic - not measured for this page",
                     "optimal_schema_count": "3-5 schema types per page for comprehensive coverage",
                     "schema_size_limit": "Each schema block should be under 1KB for optimal parsing",
                     "entity_reference_depth": "2-3 levels of @id references for entity linking",
@@ -153,19 +155,13 @@ class SchemaPayloadGenerator:
         entity = inputs.get("primary_entity", "")
 
         # Generate Article schema from actual page data
+        author_name = inputs.get("author", {}).get("name", "").strip()
+        publisher_name = inputs.get("publisher", {}).get("name", "").strip()
         article_schema_from_page = {
             "@context": "https://schema.org",
             "@type": "TechArticle",
             "headline": title or inputs.get("headline", ""),
             "description": meta_desc or "",
-            "author": {
-                "@type": "Person",
-                "name": inputs.get("author", {}).get("name", "[Author Name]")
-            },
-            "publisher": {
-                "@type": "Organization",
-                "name": inputs.get("publisher", {}).get("name", "[Publisher Name]")
-            },
             "url": url,
             "datePublished": inputs.get("publish_date", ""),
             "dateModified": inputs.get("modified_date", ""),
@@ -175,6 +171,10 @@ class SchemaPayloadGenerator:
             "inLanguage": "en-US",
             "isAccessibleForFree": True
         }
+        if author_name:
+            article_schema_from_page["author"] = {"@type": "Person", "name": author_name}
+        if publisher_name:
+            article_schema_from_page["publisher"] = {"@type": "Organization", "name": publisher_name}
 
         # Generate FAQ schema from H2/H3 question headings
         faq_items = []
@@ -346,28 +346,31 @@ class SchemaPayloadGenerator:
         author = inputs.get("author", {})
         publisher = inputs.get("publisher", {})
         url = inputs.get("url", "")
+
+        author_name = author.get("name", "").strip()
+        author_title = author.get("title", "").strip()
+        publisher_name = publisher.get("name", "").strip()
+        logo_url = publisher.get("logo_url", "").strip()
+        publish_date = inputs.get("publish_date", "")
+        word_count = (outline or {}).get("structural_metrics", {}).get("total_estimated_word_count", 0) or 0
+
+        author_obj = {
+            "@type": "Person",
+            "name": author_name,
+            "knowsAbout": entity,
+        }
+        if author_title:
+            author_obj["jobTitle"] = author_title
+        if author.get("social_profiles"):
+            author_obj["sameAs"] = author.get("social_profiles", [])
+
+        publisher_obj = {"@type": "Organization", "name": publisher_name}
+        if logo_url:
+            publisher_obj["logo"] = {"@type": "ImageObject", "url": logo_url}
+
         schema = {
             "@context": "https://schema.org",
             "@type": "TechArticle",
-            "headline": inputs.get("headline", f"Complete Guide to {entity}"),
-            "description": inputs.get("description", f"Comprehensive guide covering {entity} features, benefits, and implementation."),
-            "author": {
-                "@type": "Person",
-                "name": author.get("name", "[Author Name]"),
-                "jobTitle": author.get("title", "[Author Title]"),
-                "sameAs": author.get("social_profiles", []),
-                "knowsAbout": entity
-            },
-            "publisher": {
-                "@type": "Organization",
-                "name": publisher.get("name", "[Publisher Name]"),
-                "logo": {
-                    "@type": "ImageObject",
-                    "url": publisher.get("logo_url", "[Logo URL]")
-                }
-            },
-            "datePublished": inputs.get("publish_date", ""),
-            "dateModified": inputs.get("modified_date", ""),
             "mainEntityOfPage": {
                 "@type": "WebPage",
                 "@id": url
@@ -375,19 +378,26 @@ class SchemaPayloadGenerator:
             "about": {
                 "@type": "Thing",
                 "name": entity,
-                "sameAs": entity_graph.get("knowledge_graph_uris", {}).get("wikidata", "") if entity_graph else ""
             },
             "mentions": [
                 {"@type": "Thing", "name": r["name"]}
                 for r in (entity_graph or {}).get("related_entities", [])[:10]
             ],
             "keywords": inputs.get("seed_phrase", ""),
-            "articleSection": "Technology",
-            "wordCount": (outline or {}).get("structural_metrics", {}).get("total_estimated_word_count", 2500),
             "inLanguage": "en-US",
             "isAccessibleForFree": True,
-            "image": inputs.get("hero_image_url", "")
         }
+        if entity_graph and entity_graph.get("knowledge_graph_uris", {}).get("sameAs_candidates"):
+            schema["about"]["sameAs"] = entity_graph["knowledge_graph_uris"]["sameAs_candidates"]
+        if url:
+            schema["mainEntityOfPage"]["@id"] = url
+        if publish_date:
+            schema["datePublished"] = publish_date
+        modified_date = inputs.get("modified_date", "")
+        if modified_date:
+            schema["dateModified"] = modified_date
+        if word_count:
+            schema["wordCount"] = word_count
         return schema
 
     def _generate_faq_schema(self, inputs: Dict, outline: Dict) -> Dict[str, Any]:
@@ -408,26 +418,16 @@ class SchemaPayloadGenerator:
                         "name": question,
                         "acceptedAnswer": {
                             "@type": "Answer",
-                            "text": f"[Answer to '{question}' - 40-60 word response required]"
+                            "text": "[Answer text must be written from the article content - required before publishing]"
                         }
                     })
         if not faq_items:
-            default_questions = [
-                f"What is {entity}?",
-                f"How much does {entity} cost?",
-                f"What are the benefits of {entity}?",
-                f"How do you implement {entity}?",
-                f"What are the best {entity} alternatives?"
-            ]
-            for q in default_questions:
-                faq_items.append({
-                    "@type": "Question",
-                    "name": q,
-                    "acceptedAnswer": {
-                        "@type": "Answer",
-                        "text": f"[40-60 word answer to '{q}']"
-                    }
-                })
+            return {
+                "@context": "https://schema.org",
+                "@type": "FAQPage",
+                "status": "NO_FAQ_QUESTIONS",
+                "message": "No real FAQ questions could be extracted from the outline. FAQ schema is only generated from actual questions found in the content."
+            }
         return {
             "@context": "https://schema.org",
             "@type": "FAQPage",
@@ -448,17 +448,16 @@ class SchemaPayloadGenerator:
                 steps.append({
                     "@type": "HowToStep",
                     "name": h3.get("title", f"Step {i+1}"),
-                    "text": f"[Detailed description of {h3.get('title', f'Step {i+1}')} - include specific actions and expected outcomes]",
+                    "text": "[Describe the specific actions and expected outcome for this step based on the article content]",
                     "position": i + 1
                 })
         if not steps:
-            steps = [
-                {"@type": "HowToStep", "name": "Assessment", "text": "Evaluate requirements and current infrastructure.", "position": 1},
-                {"@type": "HowToStep", "name": "Planning", "text": "Create implementation roadmap with milestones.", "position": 2},
-                {"@type": "HowToStep", "name": "Configuration", "text": "Set up and configure the solution.", "position": 3},
-                {"@type": "HowToStep", "name": "Testing", "text": "Run comprehensive testing protocols.", "position": 4},
-                {"@type": "HowToStep", "name": "Deployment", "text": "Go live with monitoring in place.", "position": 5}
-            ]
+            return {
+                "@context": "https://schema.org",
+                "@type": "HowTo",
+                "status": "NO_STEPS",
+                "message": "No HowTo steps could be extracted from the outline. HowTo schema is only generated from actual step sections found in the content."
+            }
         return {
             "@context": "https://schema.org",
             "@type": "HowTo",
@@ -500,33 +499,39 @@ class SchemaPayloadGenerator:
 
     def _generate_author_schema(self, author: Dict) -> Dict[str, Any]:
         """Generate author schema."""
-        return {
+        schema = {
             "@context": "https://schema.org",
             "@type": "Person",
-            "name": author.get("name", "[Author Name]"),
-            "jobTitle": author.get("title", "[Author Title]"),
-            "worksFor": {
-                "@type": "Organization",
-                "name": author.get("organization", "[Organization]")
-            },
+            "name": author.get("name", "").strip(),
             "sameAs": author.get("social_profiles", []),
             "knowsAbout": author.get("expertise", []),
             "hasCredential": author.get("credentials", [])
         }
+        title = author.get("title", "").strip()
+        if title:
+            schema["jobTitle"] = title
+        org = author.get("organization", "").strip()
+        if org:
+            schema["worksFor"] = {"@type": "Organization", "name": org}
+        if not schema.get("name"):
+            schema["status"] = "NO_AUTHOR_DATA"
+        return schema
 
     def _generate_publisher_schema(self, publisher: Dict) -> Dict[str, Any]:
         """Generate publisher schema."""
-        return {
+        schema = {
             "@context": "https://schema.org",
             "@type": "Organization",
-            "name": publisher.get("name", "[Publisher Name]"),
-            "url": publisher.get("url", ""),
-            "logo": {
-                "@type": "ImageObject",
-                "url": publisher.get("logo_url", "")
-            },
+            "name": publisher.get("name", "").strip(),
+            "url": publisher.get("url", "").strip(),
             "sameAs": publisher.get("social_profiles", [])
         }
+        logo_url = publisher.get("logo_url", "").strip()
+        if logo_url:
+            schema["logo"] = {"@type": "ImageObject", "url": logo_url}
+        if not schema.get("name"):
+            schema["status"] = "NO_PUBLISHER_DATA"
+        return schema
 
     def _generate_breadcrumb_schema(self, inputs: Dict) -> Dict[str, Any]:
         """Generate breadcrumb schema."""
@@ -684,7 +689,7 @@ class SchemaPayloadGenerator:
             recs.append({
                 "priority": "MEDIUM",
                 "action": "Add FAQPage schema",
-                "detail": "FAQ schema increases AI Overview citation probability by 25%"
+                "detail": "(General industry guidance, unverified): FAQ schema increases AI Overview citation probability by 25%"
             })
         if not schemas.get("howto"):
             recs.append({

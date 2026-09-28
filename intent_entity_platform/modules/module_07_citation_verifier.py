@@ -300,7 +300,7 @@ class CitationSourceVerifier:
             recs.append({
                 "priority": "CRITICAL",
                 "action": f"Add source citations for {stats_without_source} unsourced statistics",
-                "detail": f"Found {stats_without_source} statistics without source attribution. Use 'According to [Source], [statistic]' format. Unsourced statistics reduce E-E-A-T by 40-60%."
+                "detail": f"Found {stats_without_source} statistics without source attribution. Use 'According to [Source], [statistic]' format. (General industry guidance, unverified): unsourced statistics reduce E-E-A-T by 40-60%."
             })
 
         research_claims = re.findall(r'(?:studies?\s+(?:show|indicate|suggest|reveal|found|demonstrate))\s+([^.]+)', text, re.IGNORECASE)
@@ -488,13 +488,14 @@ class CitationSourceVerifier:
                         "type": source_type,
                         "position": m.start(),
                         "authority_score": self._estimate_authority(source_text, source_type),
+                        "authority_estimate_note": "Heuristic tier based on recognized source names - not a measured authority metric",
                         "is_url": source_type == "url",
                         "needs_verification": source_type == "text_attribution"
                     })
         return sources[:15]
 
     def _estimate_authority(self, source_text: str, source_type: str) -> float:
-        """Estimate source authority score."""
+        """Estimate source authority score (heuristic only - not a measured metric)."""
         high_authority = [
             "gartner", "forrester", "idc", "mckinsey", "bain", "deloitte", "pwc", "accenture",
             "harvard", "mit", "stanford", "oxford", "cambridge", "google", "microsoft", "apple",
@@ -556,6 +557,7 @@ class CitationSourceVerifier:
         return {
             "total_sources": len(sources),
             "average_authority_score": round(avg_authority, 3),
+            "average_authority_origin": "heuristic estimate based on source-name matching - not a measured metric",
             "authority_distribution": {
                 "high_authority_0.8_plus": high_authority,
                 "medium_authority_0.5_to_0.8": medium_authority,
@@ -743,6 +745,7 @@ class CitationSourceVerifier:
                 "verifiable_claims": fact_check.get("verifiable_claims", 0),
                 "claims_needing_sources": fact_check.get("claims_needing_sources", 0),
                 "verification_rate": fact_check.get("verification_rate", 0),
+                "data_origin": "unverified_industry_heuristic - not measured for this page",
                 "benchmark": "Professional content has 90%+ verifiable claims; below 70% indicates significant trust issues",
                 "statistical_range": f"Verification rate: {fact_check.get('verification_rate', 0)*100:.0f}% (target: 90%+)",
                 "expert_recommendation": "Every research claim, attributed claim, and statistical claim must have a verifiable source",
@@ -753,6 +756,7 @@ class CitationSourceVerifier:
                 "total_statistics": len(statistics),
                 "statistics_without_sources": fact_check.get("statistics_without_sources", 0),
                 "source_coverage_rate": fact_check.get("source_coverage_rate", 0),
+                "data_origin": "unverified_industry_heuristic - not measured for this page",
                 "benchmark": "All statistics must have source attribution; unsourced statistics reduce E-E-A-T by 40-60%",
                 "statistical_range": f"Source coverage: {fact_check.get('source_coverage_rate', 0)*100:.0f}% (target: 100%)",
                 "expert_recommendation": "Add inline source attribution for every statistic using 'According to [Source]' format",
@@ -764,6 +768,7 @@ class CitationSourceVerifier:
                 "quality_tier": source_quality.get("quality_tier", "UNKNOWN"),
                 "high_authority_count": source_quality.get("authority_distribution", {}).get("high_authority_0.8_plus", 0),
                 "source_diversity_score": source_quality.get("source_diversity_score", 0),
+                "data_origin": "unverified_industry_heuristic - not measured for this page",
                 "benchmark": "Top content cites sources from 3+ tiers with average authority >0.7; 3+ Tier 1 sources required",
                 "statistical_range": f"Source quality: {source_quality.get('quality_tier', 'UNKNOWN')} (avg authority: {source_quality.get('average_authority_score', 0):.2f})",
                 "expert_recommendation": "Add 2-3 Tier 1 authoritative sources (academic, government, standards bodies) for maximum credibility",
@@ -776,6 +781,7 @@ class CitationSourceVerifier:
                 "unsourced_claims": hallucination_risk.get("unsourced_claims_count", 0),
                 "unsourced_statistics": hallucination_risk.get("unsourced_statistics_count", 0),
                 "specificity_assessment": hallucination_risk.get("specificity_metrics", {}).get("specificity_assessment", "UNKNOWN"),
+                "data_origin": "unverified_industry_heuristic - not measured for this page",
                 "benchmark": "Low hallucination risk requires <10% unsourced claims; HIGH or CRITICAL risk content should not be published",
                 "statistical_range": f"Hallucination risk: {hallucination_risk.get('hallucination_risk_score', 0)*100:.0f}% ({hallucination_risk.get('risk_level', 'UNKNOWN')})",
                 "expert_recommendation": f"Address {hallucination_risk.get('unsourced_claims_count', 0)} unsourced claims and {hallucination_risk.get('unsourced_statistics_count', 0)} unsourced statistics before publishing",
@@ -785,6 +791,7 @@ class CitationSourceVerifier:
             "verification_summary_insights": {
                 "overall_status": fact_check.get("overall_verification_status", "UNKNOWN"),
                 "critical_gaps": fact_check.get("claims_needing_sources", 0) + fact_check.get("statistics_without_sources", 0),
+                "data_origin": "unverified_industry_heuristic - not measured for this page",
                 "benchmark": "FULLY_VERIFIED or MOSTLY_VERIFIED status required before publishing; SIGNIFICANT_GAPS content must be revised",
                 "statistical_range": f"Verification status: {fact_check.get('overall_verification_status', 'UNKNOWN')} (critical gaps: {fact_check.get('claims_needing_sources', 0) + fact_check.get('statistics_without_sources', 0)})",
                 "expert_recommendation": "Achieve MOSTLY_VERIFIED or FULLY_VERIFIED status by addressing all critical gaps before publication",

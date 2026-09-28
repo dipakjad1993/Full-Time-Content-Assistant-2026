@@ -29,17 +29,33 @@ class IntentBouncePredictor:
         audience_config = audience_config or {}
         if not text or not text.strip():
             text = url_data.get("page_text", "") if url_data else ""
+
         if not text or not text.strip():
-            text = (outline or {}).get("_sample_text",
-                "This is a comprehensive guide to the solution. It provides detailed information about features, benefits, and implementation. "
-                "According to research, organizations benefit from implementing this solution. The primary benefits include cost reduction, "
-                "improved efficiency, and better scalability. Studies show that 67% of companies report measurable ROI within the first year. "
-                "When comparing solutions, look at pricing, features, support, and integration capabilities. "
-                "Implementation typically follows these steps: assessment, planning, configuration, testing, and go-live. "
-                "Best practices include establishing clear governance, investing in training, and conducting regular audits. "
-                "Common challenges include integration complexity, data migration, and user adoption. "
-                "Looking ahead, the market is expected to grow significantly through 2026 and beyond. "
-                "Expert opinions suggest that organizations should prioritize this technology for competitive advantage.")
+            no_content = True
+            text = ""
+        else:
+            no_content = False
+
+        if no_content:
+            return {
+                "module": self.module_id,
+                "module_name": self.module_name,
+                "status": "NO_CONTENT",
+                "message": "No real content text was provided or fetched. Intent and bounce-risk analysis requires the actual article text.",
+                "url_intent_analysis": real_intent_analysis,
+                "content_depth_analysis": {
+                    "total_words": 0,
+                    "total_sentences": 0,
+                    "paragraph_count": 0,
+                    "avg_paragraph_length": 0.0,
+                    "reading_time_minutes": 0.0,
+                    "content_depth_tier": "NO_CONTENT"
+                },
+                "recommendations": [
+                    "Provide the article content (paste text or analyze a URL) to run real intent and bounce-risk analysis.",
+                    "Analyze a live URL with /api/analyze-url to get real page content for this module."
+                ]
+            }
 
         above_fold = self._analyze_above_fold(text, outline)
         readability = self._assess_readability_alignment(text, audience_config)
@@ -74,9 +90,11 @@ class IntentBouncePredictor:
                 "conversion_readiness": intent_match.get("alignment_tier", "UNKNOWN"),
                 "trust_signals_present": engagement_signals.get("elements_present", 0),
                 "trust_signal_target": 7,
+                "trust_signal_target_origin": "heuristic, not measured",
                 "content_freshness_signal": "Include current year (2026) data for freshness"
             },
             "competitor_bounce_comparison": {
+                "data_origin": "unverified_industry_heuristic - not measured for this page",
                 "industry_avg_bounce_rate": "40-60% for informational content",
                 "target_bounce_rate": "< 45% for well-optimized content",
                 "your_estimated_bounce_risk": bounce_risk.get("bounce_risk_level", "UNKNOWN"),
@@ -108,6 +126,7 @@ class IntentBouncePredictor:
             ],
             "detailed_analysis": {
                 "industry_benchmarks": {
+                    "data_origin": "unverified_industry_heuristic - not measured for this page",
                     "average_bounce_rate": "40-60% for informational content, 20-40% for transactional",
                     "optimal_dwell_time": "2-3 minutes for comprehensive guides, 1-2 minutes for listicles",
                     "above_fold_value_delivery": "Top pages deliver value within first 100 words",
@@ -115,6 +134,7 @@ class IntentBouncePredictor:
                     "engagement_signal_count": "5-7 engagement elements per 1000 words optimal"
                 },
                 "statistical_ranges": {
+                    "data_origin": "unverified_industry_heuristic - not measured for this page",
                     "optimal_paragraph_length": "50-100 words per paragraph for readability",
                     "heading_density": "1 heading per 200-300 words for scanability",
                     "list_usage": "3-5 bullet lists per 2000-word article",
@@ -140,15 +160,16 @@ class IntentBouncePredictor:
                     "Not including current data or year references for freshness"
                 ],
                 "success_metrics_to_track": [
-                    "Bounce rate percentage (target: <45% for informational content)",
-                    "Average dwell time (target: >2 minutes for comprehensive content)",
-                    "Pages per session (target: >1.5 pages)",
-                    "Scroll depth percentage (target: >70% reach bottom)",
-                    "Click-through rate from SERPs (target: >3% average)",
-                    "Engagement signal count per article (target: 5-7 elements)",
+                    "(General industry guidance, unverified): Bounce rate percentage (target: <45% for informational content)",
+                    "(General industry guidance, unverified): Average dwell time (target: >2 minutes for comprehensive content)",
+                    "(General industry guidance, unverified): Pages per session (target: >1.5 pages)",
+                    "(General industry guidance, unverified): Scroll depth percentage (target: >70% reach bottom)",
+                    "(General industry guidance, unverified): Click-through rate from SERPs (target: >3% average)",
+                    "(General industry guidance, unverified): Engagement signal count per article (target: 5-7 elements)",
                     "Readability score alignment with target audience level"
                 ]
-            }
+            },
+            "data_source": "real_time_analysis"
         }
 
     def _analyze_url_intent_bounce(self, url_data: Dict, audience_config: Dict = None) -> Dict[str, Any]:
@@ -285,25 +306,25 @@ class IntentBouncePredictor:
             intent_recommendations.append({
                 "priority": "HIGH",
                 "action": "Add direct answer/definition in first paragraph",
-                "impact": "Immediate value delivery reduces bounce by 20-35%"
+                "impact": "(General industry guidance, unverified): Immediate value delivery reduces bounce by 20-35%"
             })
         if len(h2s) < 3:
             intent_recommendations.append({
                 "priority": "MEDIUM",
                 "action": f"Add more H2 headings for scanability (current: {len(h2s)})",
-                "impact": "Good heading structure improves dwell time by 15-25%"
+                "impact": "(General industry guidance, unverified): Good heading structure improves dwell time by 15-25%"
             })
         if engagement_elements < 3:
             intent_recommendations.append({
                 "priority": "MEDIUM",
                 "action": "Add more engagement elements (lists, bold, examples, statistics)",
-                "impact": "Engagement elements increase dwell time by 20-40%"
+                "impact": "(General industry guidance, unverified): Engagement elements increase dwell time by 20-40%"
             })
         if image_count == 0 and actual_word_count > 500:
             intent_recommendations.append({
                 "priority": "MEDIUM",
                 "action": "Add visual content (images, charts) for visual breaks",
-                "impact": "Visual content reduces bounce by 15-25%"
+                "impact": "(General industry guidance, unverified): Visual content reduces bounce by 15-25%"
             })
         if not intent_signals.get("informational") and funnel_stage == "top":
             intent_recommendations.append({
@@ -350,10 +371,10 @@ class IntentBouncePredictor:
                 "bounce_risk_level": bounce_risk_level,
                 "risk_factors": bounce_risk_factors,
                 "expected_bounce_rate": (
-                    "25-35%" if bounce_score < 0.2 else
-                    "35-50%" if bounce_score < 0.4 else
-                    "50-65%" if bounce_score < 0.6 else
-                    "65%+"
+                    "(General industry guidance, unverified): 25-35%" if bounce_score < 0.2 else
+                    "(General industry guidance, unverified): 35-50%" if bounce_score < 0.4 else
+                    "(General industry guidance, unverified): 50-65%" if bounce_score < 0.6 else
+                    "(General industry guidance, unverified): 65%+"
                 ),
                 "improvement_potential": "HIGH" if bounce_score > 0.3 else "MODERATE"
             },
@@ -385,6 +406,7 @@ class IntentBouncePredictor:
             },
             "intent_recommendations": intent_recommendations,
             "competitor_comparison_benchmarks": {
+                "data_origin": "unverified_industry_heuristic - not measured for this page",
                 "industry_avg_bounce": "40-60%",
                 "your_estimated_bounce": f"{int(25 + bounce_score * 40)}-{int(35 + bounce_score * 40)}%",
                 "target_bounce": "< 45%",

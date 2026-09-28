@@ -74,6 +74,7 @@ class GEOTracker:
             ],
             "detailed_analysis": {
                 "industry_benchmarks": {
+                    "data_origin": "unverified_industry_heuristic - not measured for this page",
                     "ai_overview_citation_rate": "Top-performing content achieves 15-25% citation rate in AI Overviews",
                     "perplexity_citation_frequency": "Optimized content appears in 10-20% of relevant Perplexity answers",
                     "citation_driven_traffic": "Citation-driven traffic converts 2-3x higher than organic search traffic",
@@ -81,6 +82,7 @@ class GEOTracker:
                     "content_refresh_frequency": "Update cited content every 30-60 days to maintain citations"
                 },
                 "statistical_ranges": {
+                    "data_origin": "unverified_industry_heuristic - not measured for this page",
                     "optimal_query_count": "Track 5-10 primary queries per piece of content",
                     "citation_loss_recovery_time": "Average 7-14 days to recover lost citations with updates",
                     "competitor_citation_gap": "Top 3 competitors typically hold 60-80% of available citations",
@@ -271,25 +273,25 @@ class GEOTracker:
             geo_recommendations.append({
                 "priority": "CRITICAL",
                 "action": "Add definition sentences ('X is a...' format) at the start of key sections",
-                "impact": "Increases AI citation probability by 40-60%"
+                "impact": "(General industry guidance, unverified): Increases AI citation probability by 40-60%"
             })
         if statistical_evidence < 3:
             geo_recommendations.append({
                 "priority": "HIGH",
                 "action": f"Add more statistical evidence (current: {statistical_evidence} data points, target: 5+)",
-                "impact": "Statistical content is cited 3x more often in AI responses"
+                "impact": "(General industry guidance, unverified): Statistical content is cited 3x more often in AI responses"
             })
         if not expert_attribution:
             geo_recommendations.append({
                 "priority": "HIGH",
                 "action": "Add expert attributions, research citations, and source references",
-                "impact": "Attributed content is 2.5x more likely to be cited by AI"
+                "impact": "(General industry guidance, unverified): Attributed content is 2.5x more likely to be cited by AI"
             })
         if not has_schema:
             geo_recommendations.append({
                 "priority": "MEDIUM",
                 "action": "Add structured data (Article, FAQ, HowTo schema) to improve AI parsing",
-                "impact": "Schema-marked content has 25% higher AI citation rate"
+                "impact": "(General industry guidance, unverified): Schema-marked content has 25% higher AI citation rate"
             })
         if not question_answer:
             geo_recommendations.append({

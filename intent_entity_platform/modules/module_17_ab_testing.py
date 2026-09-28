@@ -50,7 +50,8 @@ class ABTestingEngine:
         except Exception:
             return {"baseline_p": float(baseline_p), "mde": float(mde),
                     "power": power, "alpha": alpha,
-                    "required_sample_per_variant": 1000, "formula": "fallback"}
+                    "required_sample_per_variant": 1000, "formula": "fallback",
+                    "estimate": True, "source": "heuristic, not measured"}
 
     def analyze(self, inputs: Dict[str, Any]) -> Dict[str, Any]:
         """Full A/B testing configuration pipeline."""
@@ -127,12 +128,13 @@ class ABTestingEngine:
             "detailed_analysis": {
                 "statistical_benchmarks": {
                     "minimum_sample_size": f"{sample_size_display} impressions per variant for 80% power at 95% confidence (computed: baseline CTR {sample_calc.get('baseline_p', 'N/A')}, MDE {sample_calc.get('mde', 'N/A')})",
-                    "minimum_detectable_effect": "15% relative lift for CTR (realistic for SEO experiments)",
-                    "typical_test_duration": "30 days minimum for organic search (slower traffic than paid)",
+                    "minimum_detectable_effect": "(General industry guidance, unverified): 15% relative lift for CTR (realistic for SEO experiments)",
+                    "typical_test_duration": "(General industry guidance, unverified): 30 days minimum for organic search (slower traffic than paid)",
                     "required_confidence_level": "95% (p < 0.05) with Bonferroni correction for >2 variants",
                     "power_threshold": "80% minimum - lower power increases false negative risk"
                 },
                 "seo_experiment_benchmarks": {
+                    "data_origin": "unverified_industry_heuristic - not measured for this page",
                     "typical_ctr_lift_from_title_optimization": "5-20% relative improvement",
                     "typical_position_impact_from_content_restructure": "1-3 position improvement over 30 days",
                     "meta_description_test_success_rate": "60-70% show measurable CTR impact",
@@ -160,7 +162,8 @@ class ABTestingEngine:
                     "Track conversion rate impact if available (not just traffic metrics)",
                     "Document test velocity - time from hypothesis to statistically significant result"
                 ]
-            }
+            },
+            "data_source": "real_time_analysis"
         }
 
     def _analyze_url_ab_opportunities(self, url_data: Dict) -> Dict[str, Any]:
@@ -195,16 +198,16 @@ class ABTestingEngine:
                     "name": "Title with Power Word",
                     "change": "Add a compelling modifier (e.g., 'Ultimate', 'Proven', 'Complete')",
                     "estimated_length": min(60, title_length + 10),
-                    "rationale": "Power words increase CTR by 5-15% in SERPs"
+                    "rationale": "(General industry guidance, unverified): Power words increase CTR by 5-15% in SERPs"
                 },
                 "variant_b": {
                     "name": "Title with Current Year",
                     "change": f"Add current year to title for freshness signal",
                     "estimated_length": min(60, title_length + 6),
-                    "rationale": "Year in title increases CTR by 10-25% for informational queries"
+                    "rationale": "(General industry guidance, unverified): Year in title increases CTR by 10-25% for informational queries"
                 },
                 "primary_metric": "organic_ctr",
-                "estimated_impact": "5-20% CTR improvement",
+                "estimated_impact": "(General industry guidance, unverified): 5-20% CTR improvement",
                 "test_duration_days": 30,
                 "priority": "HIGH"
             })
@@ -218,12 +221,12 @@ class ABTestingEngine:
                 "variant_a": {
                     "name": "Definition First",
                     "change": "Add a concise 40-word definition of the primary topic as the first paragraph",
-                    "estimated_impact": "8-15% CTR lift for informational queries"
+                    "estimated_impact": "(General industry guidance, unverified): 8-15% CTR lift for informational queries"
                 },
                 "variant_b": {
                     "name": "Key Takeaway First",
                     "change": "Lead with the single most important takeaway or statistic",
-                    "estimated_impact": "5-12% bounce rate reduction"
+                    "estimated_impact": "(General industry guidance, unverified): 5-12% bounce rate reduction"
                 },
                 "primary_metric": "bounce_rate",
                 "test_duration_days": 30,
@@ -260,7 +263,7 @@ class ABTestingEngine:
                 "variant_a": {
                     "name": "Article Schema Added",
                     "change": "Inject Article/BlogPosting JSON-LD schema via CDN edge worker",
-                    "rationale": "Schema markup can increase CTR by 10-30% for eligible queries"
+                    "rationale": "(General industry guidance, unverified): Schema markup can increase CTR by 10-30% for eligible queries"
                 },
                 "primary_metric": "organic_ctr",
                 "test_duration_days": 30,
@@ -276,7 +279,7 @@ class ABTestingEngine:
                 "variant_a": {
                     "name": "Enhanced Visuals",
                     "change": f"Add {3 - image_count} custom images, charts, or screenshots",
-                    "rationale": "Visual content increases time-on-page by 2-3x and social shares by 2x"
+                    "rationale": "(General industry guidance, unverified): Visual content increases time-on-page by 2-3x and social shares by 2x"
                 },
                 "primary_metric": "time_on_page",
                 "test_duration_days": 30,
@@ -308,7 +311,7 @@ class ABTestingEngine:
                 "name": "Action-Oriented Meta",
                 "change": "Write meta description with clear value proposition and CTA",
                 "estimated_length": 155,
-                "rationale": "Meta descriptions with CTAs increase CTR by 5-15%"
+                "rationale": "(General industry guidance, unverified): Meta descriptions with CTAs increase CTR by 5-15%"
             },
             "variant_b": {
                 "name": "Question-Answer Meta",
@@ -350,6 +353,7 @@ class ABTestingEngine:
                 "internal_link_opportunity": "HIGH" if link_count < 4 else "MODERATE" if link_count < 8 else "OPTIMAL"
             },
             "sample_size_requirements": {
+                "data_origin": "unverified_industry_heuristic - not measured for this page",
                 "minimum_impressions_per_variant": 1000,
                 "estimated_days_for_significance": "21-30 days depending on query volume",
                 "recommended_baseline_period": "7 days before test launch",
@@ -372,6 +376,7 @@ class ABTestingEngine:
             "secondary_metrics": ["average_position", "impressions", "clicks", "bounce_rate"],
             "test_duration_days": 30,
             "minimum_sample_size": calc.get("required_sample_per_variant", 1000),
+            "minimum_sample_size_origin": "computed via two-proportion z-test from provided baseline; fallback 1000 is heuristic, not measured",
             "confidence_level": 0.95,
             "traffic_split": {"control": 50, "variant": 50},
             "segments": ["all_traffic", "mobile", "desktop"],
@@ -412,6 +417,7 @@ class ABTestingEngine:
                 "metrics": ["clicks", "impressions", "ctr", "position"],
                 "check_frequency": "daily",
                 "alert_thresholds": {
+                    "data_origin": "unverified_industry_heuristic - not measured for this page",
                     "ctr_drop": 0.15,
                     "position_drop": 3,
                     "impression_drop": 0.2
@@ -436,19 +442,19 @@ class ABTestingEngine:
             "auto_rollback_triggers": [
                 {
                     "trigger": "CTR_DROP",
-                    "condition": "CTR drops > 15% compared to control within 7 days",
+                    "condition": "(General industry guidance, unverified): CTR drops > 15% compared to control within 7 days",
                     "action": "Automatically revert variant to control",
                     "notification": "Immediate email + Slack alert"
                 },
                 {
                     "trigger": "POSITION_DROP",
-                    "condition": "Average position drops > 3 positions within 7 days",
+                    "condition": "(General industry guidance, unverified): Average position drops > 3 positions within 7 days",
                     "action": "Automatically revert variant to control",
                     "notification": "Immediate email + Slack alert"
                 },
                 {
                     "trigger": "IMPRESSION_DROP",
-                    "condition": "Impressions drop > 20% compared to control within 7 days",
+                    "condition": "(General industry guidance, unverified): Impressions drop > 20% compared to control within 7 days",
                     "action": "Flag for manual review, prepare rollback",
                     "notification": "Email alert within 1 hour"
                 },
@@ -480,6 +486,7 @@ class ABTestingEngine:
                 "significance_level": 0.05,
                 "required_sample_per_variant": calc.get("required_sample_per_variant", 1000),
                 "estimated_days_to_significance": 30,
+                "estimated_days_to_significance_origin": "heuristic, not measured",
                 "calculation_method": "two-proportion z-test"
             },
             "analysis_method": "Frequentist A/B testing with sequential monitoring",

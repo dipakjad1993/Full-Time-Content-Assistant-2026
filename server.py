@@ -2,9 +2,10 @@
 Full Web Server with all 21 module outputs + 5 blueprint outputs.
 Real-time data integration. Run: python server.py
 """
-import sys,os,json,traceback,urllib.request,urllib.parse,re
+import sys,os,json,traceback,urllib.request,urllib.parse,re,secrets,threading,logging
 from pathlib import Path
-from flask import Flask,request,jsonify,Response
+from flask import Flask,request,jsonify,Response,g
+from functools import wraps
 sys.path.insert(0,str(Path(__file__).parent))
 from intent_entity_platform.core.engine import PlatformEngine
 from intent_entity_platform.core.input_framework import (
@@ -12,8 +13,65 @@ from intent_entity_platform.core.input_framework import (
     BrandConstraints,AudienceProfile,TechnicalCredentials
 )
 from intent_entity_platform.utils.web_data import web_search as _real_web_search
+from intent_entity_platform.utils.web_data import extract_page as _extract_page_shared
+from intent_entity_platform.utils.security import (
+    is_url_allowed, safe_fetch, check_rate_limit, validate_json_dict)
+from intent_entity_platform.utils.serp_provider import serp_fetch
+from intent_entity_platform.utils.content_scorer import score_content
+from intent_entity_platform.utils.gsc_quickwins import parse_gsc_csv, quick_wins
+from intent_entity_platform.utils.brief_generator import generate_brief
 
-import random,time,smtplib,io,datetime
+APP_DEBUG = os.environ.get("APP_DEBUG", "false").lower() in ("1","true","yes")
+APP_VERSION = "2.1.0-enterprise"
+MAX_JSON_BYTES = 6 * 1024 * 1024
+
+app = None  # created below (single Flask instance; see app=Flask(__name__))
+try:
+    app.config["MAX_CONTENT_LENGTH"] = MAX_JSON_BYTES
+except Exception:
+    pass
+
+def _client_ip():
+    try:
+        fwd = request.headers.get("X-Forwarded-For", "")
+        if fwd:
+            return fwd.split(",")[0].strip()[:64]
+    except Exception:
+        pass
+    try:
+        return (request.remote_addr or "unknown")[:64]
+    except Exception:
+        return "unknown"
+
+def _safe_error(public_msg, exc=None, code=500):
+    try:
+        logging.getLogger("content-platform").exception(
+            "api_error: %s", str(exc)[:500] if exc else public_msg)
+    except Exception:
+        pass
+    if APP_DEBUG and exc is not None:
+        return jsonify({"error": public_msg, "trace": traceback.format_exc()}), code
+    return jsonify({"error": public_msg}), code
+
+def _apply_security_headers(resp):
+    try:
+        resp.headers["X-Content-Type-Options"] = "nosniff"
+        resp.headers["X-Frame-Options"] = "SAMEORIGIN"
+        resp.headers["Referrer-Policy"] = "strict-origin-when-cross-origin"
+        resp.headers["Permissions-Policy"] = "camera=(), microphone=(), geolocation=()"
+        # Allow self + Google Fonts (used by UI) + inline styles/scripts the app ships.
+        resp.headers["Content-Security-Policy"] = (
+            "default-src 'self'; script-src 'self' 'unsafe-inline'; "
+            "style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; "
+            "font-src 'self' https://fonts.gstatic.com; img-src 'self' data:; "
+            "connect-src 'self'; frame-ancestors 'self'; base-uri 'self'")
+        if request.url.startswith("https://"):
+            resp.headers["Strict-Transport-Security"] = "max-age=31536000; includeSubDomains"
+    except Exception:
+        pass
+    return resp
+
+import time,smtplib,io,datetime
 from email.mime.multipart import MIMEMultipart
 from email.mime.text import MIMEText
 from email.mime.application import MIMEApplication
@@ -45,6 +103,98 @@ _OTP_MAX_TRIES=5
 _OTP_MAX_REQUESTS=3
 _OTP_WINDOW=600
 _EMAIL_RE=re.compile(r'^[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}$')
+
+# ---------------------------------------------------------------------------
+# Real-time analysis progress tracking (polled by the browser)
+# ---------------------------------------------------------------------------
+_PROGRESS_STORE={}
+_PROGRESS_TTL=900   # 15 minutes; stale entries are garbage-collected
+_TOTAL_MODULES=21
+
+def _progress_gc():
+    """Drop progress entries older than the TTL (bounded memory)."""
+    now=time.time()
+    stale=[k for k,v in _PROGRESS_STORE.items() if now-v.get('started_at',0)>_PROGRESS_TTL]
+    for k in stale:
+        _PROGRESS_STORE.pop(k,None)
+
+def _make_progress_recorder(analysis_id):
+    """Return a progress_callback wired to the shared progress store."""
+    _progress_gc()
+    _PROGRESS_STORE[analysis_id]={
+        "analysis_id": analysis_id,
+        "phase": "Starting",
+        "phase_label": "Preparing analysis engine...",
+        "current_module": None,
+        "current_module_name": "",
+        "module_status": {},      # M01..M21 -> running/completed/error
+        "completed_modules": [],
+        "errors": [],
+        "phases_done": [],
+        "percent": 0,
+        "done": False,
+        "started_at": time.time(),
+        "updated_at": time.time(),
+    }
+
+    def _rec(step, name, status):
+        rec=_PROGRESS_STORE.get(analysis_id)
+        if rec is None:
+            return
+        now=time.time()
+        rec["updated_at"]=now
+        if step in ("SETUP","FETCH"):
+            rec["phase"]=name
+            rec["phase_label"]=name
+            if status=="running":
+                rec["phase_status"]="running"
+            elif status=="completed":
+                rec["phase_status"]="completed"
+                if name not in rec["phases_done"]:
+                    rec["phases_done"].append(name)
+        elif step.startswith("M"):
+            if status=="running":
+                rec["current_module"]=step
+                rec["current_module_name"]=name
+                rec["module_status"][step]="running"
+            elif status=="completed":
+                rec["module_status"][step]="completed"
+                if step not in rec["completed_modules"]:
+                    rec["completed_modules"].append(step)
+                if rec.get("current_module")==step:
+                    rec["current_module"]=None
+                    rec["current_module_name"]=""
+            elif str(status).startswith("error"):
+                rec["module_status"][step]="error"
+                rec["errors"].append(f"{step} ({name}): {status}")
+                if rec.get("current_module")==step:
+                    rec["current_module"]=None
+                    rec["current_module_name"]=""
+        completed=len(rec.get("completed_modules",[]))
+        base=round(completed/_TOTAL_MODULES*100)
+        rec["percent"]=min(100, base)
+        rec["done"]=rec.get("done",False) or completed>=_TOTAL_MODULES
+        if rec["done"]:
+            rec["percent"]=100
+            rec["current_module"]=None
+            rec["current_module_name"]=""
+            rec["phase"]="Complete"
+            rec["phase_label"]="All 21 modules completed"
+    return _rec
+
+def _mark_progress_done(analysis_id, errors=None):
+    rec=_PROGRESS_STORE.get(analysis_id)
+    if not rec:
+        return
+    rec["done"]=True
+    rec["percent"]=100
+    rec["current_module"]=None
+    rec["current_module_name"]=""
+    rec["phase"]="Complete"
+    rec["phase_label"]="All 21 modules completed"
+    if errors:
+        rec["errors"]=list(errors)
+    rec["updated_at"]=time.time()
 
 def _send_email(to_addr,subject,html_body,attach_name=None,attach_bytes=None):
     host=_mail_setting('smtp_host','SMTP_HOST','')
@@ -123,36 +273,172 @@ def _txt(x,limit=160):
 def _make_styles():
     reg=_F(False); regb=_F(True)
     return {
-        'title':ParagraphStyle('t',fontName=regb,fontSize=20,leading=25,textColor=HexColor('#1e1b4b'),spaceAfter=2),
-        'tbrand':ParagraphStyle('tb',fontName=reg,fontSize=9.5,leading=12,textColor=HexColor('#7c5cfc'),spaceAfter=4),
+        'title':ParagraphStyle('t',fontName=regb,fontSize=26,leading=32,textColor=HexColor('#ffffff'),spaceAfter=2),
+        'tbrand':ParagraphStyle('tb',fontName=reg,fontSize=10,leading=14,textColor=HexColor('#c7d2fe'),spaceAfter=4),
+        'cover_sub':ParagraphStyle('cs',fontName=reg,fontSize=11,leading=16,textColor=HexColor('#e0e7ff'),spaceAfter=4),
         'sub':ParagraphStyle('sub',fontName=reg,fontSize=9,leading=13,textColor=HexColor('#415070'),spaceAfter=2),
-        'h2':ParagraphStyle('h2',fontName=regb,fontSize=13.5,leading=17,textColor=HexColor('#5b21b6'),spaceBefore=12,spaceAfter=3),
-        'h3':ParagraphStyle('h3',fontName=regb,fontSize=10.5,leading=14,textColor=HexColor('#0e7490'),spaceBefore=7,spaceAfter=3),
-        'body':ParagraphStyle('body',fontName=reg,fontSize=8.8,leading=12.5,textColor=HexColor('#1f2937'),spaceAfter=2,splitLongWords=1),
-        'cell':ParagraphStyle('cell',fontName=reg,fontSize=7.8,leading=10.5,textColor=HexColor('#1f2937'),splitLongWords=1),
+        'h2':ParagraphStyle('h2',fontName=regb,fontSize=16,leading=20,textColor=_INK,spaceBefore=8,spaceAfter=4),
+        'h3':ParagraphStyle('h3',fontName=regb,fontSize=11.5,leading=15,textColor=_BRAND,spaceBefore=10,spaceAfter=3),
+        'h4':ParagraphStyle('h4',fontName=regb,fontSize=9.5,leading=13,textColor=_ACCENT,spaceBefore=7,spaceAfter=2),
+        'body':ParagraphStyle('body',fontName=reg,fontSize=9.2,leading=13.5,textColor=_TXT_DARK,spaceAfter=4,splitLongWords=1),
+        'cell':ParagraphStyle('cell',fontName=reg,fontSize=8.2,leading=11.5,textColor=_TXT_DARK,splitLongWords=1),
+        'cellb':ParagraphStyle('cellb',fontName=regb,fontSize=8.4,leading=11.5,textColor=_INK,splitLongWords=1),
         'th':ParagraphStyle('th',fontName=regb,fontSize=8,leading=11,textColor=HexColor('#ffffff'),splitLongWords=1),
-        'note':ParagraphStyle('note',fontName=reg,fontSize=7.8,leading=10,textColor=HexColor('#6b7280'),spaceBefore=3),
-        'statlbl':ParagraphStyle('sl',fontName=reg,fontSize=7.5,leading=9.5,textColor=HexColor('#6b7280'),alignment=1),
-        'statval':ParagraphStyle('sv',fontName=regb,fontSize=15,leading=19,textColor=HexColor('#5b21b6'),alignment=1),
+        'note':ParagraphStyle('note',fontName=reg,fontSize=7.8,leading=10,textColor=_TXT_MUT,spaceBefore=3),
+        'statlbl':ParagraphStyle('sl',fontName=reg,fontSize=7.5,leading=9.5,textColor=_TXT_MUT,alignment=1),
+        'statval':ParagraphStyle('sv',fontName=regb,fontSize=17,leading=21,textColor=_BRAND,alignment=1),
         'raw':ParagraphStyle('raw',fontName=_PDF_MONO,fontSize=6,leading=7.5,textColor=HexColor('#374151'),splitLongWords=1),
+        'toc':ParagraphStyle('toc',fontName=reg,fontSize=9.5,leading=16,textColor=_TXT_DARK,leftIndent=4),
+        'tocc':ParagraphStyle('tocc',fontName=regb,fontSize=12,leading=18,textColor=_INK),
+        'TOCHeading1':ParagraphStyle(name='TOCHeading1',fontName=regb,fontSize=12.5,leading=17,textColor=_BRAND),
     }
+
+# ---- Professional design system (slate + indigo + refined accents) ----
+_INK=HexColor('#0f172a')            # near-black slate for headings
+_TXT_DARK=HexColor('#1e293b')       # body ink
+_TXT_MUT=HexColor('#64748b')        # muted label text
+_BRAND=HexColor('#4f46e5')          # indigo-600 primary
+_BRAND_DARK=HexColor('#3730a3')     # indigo-700
+_BRAND_LIGHT=HexColor('#eef2ff')    # indigo-50 panel fill
+_ACCENT=HexColor('#0891b2')         # cyan-600 secondary
+_OK_GREEN=HexColor('#16a34a')
+_WARN_AMBER=HexColor('#d97706')
+_ERR_RED=HexColor('#dc2626')
+_NAVY=HexColor('#0f172a')           # cover hero navy
+_NAVY2=HexColor('#1e293b')          # secondary navy band
+_TBL_HEAD=HexColor('#4338ca')       # indigo-700 header
+_TBL_LINE=HexColor('#e2e8f0')       # slate-200 hairline
+_TBL_ALT=HexColor('#f8fafc')        # slate-50 zebra
+_CARD_BG=HexColor('#ffffff')
+_CARD_BORDER=HexColor('#e2e8f0')
+_GOLD=HexColor('#f59e0b')           # accent highlight
+
+def _status_color(val):
+    s=str(val).upper()
+    if 'CRITICAL' in s or 'ERROR' in s or 'FAILED' in s or 'INVALID' in s or 'BROKEN' in s or 'MISSING' in s or 'NOT' in s:
+        return HexColor('#dc2626')
+    if 'HIGH' in s or 'RISK' in s or 'POOR' in s:
+        return HexColor('#d97706')
+    if 'LOW' in s or 'OK' in s or 'PASS' in s or 'VALID' in s or 'MINIMAL' in s or 'GOOD' in s:
+        return HexColor('#059669')
+    if 'MEDIUM' in s or 'MODERATE' in s:
+        return HexColor('#ca8a04')
+    return HexColor('#1f2937')
+
+def _priority_tag(val):
+    s=str(val).upper()
+    if s=='CRITICAL': return HexColor('#dc2626')
+    if s=='HIGH': return HexColor('#d97706')
+    if s=='MEDIUM': return HexColor('#ca8a04')
+    if s=='LOW': return HexColor('#059669')
+    return HexColor('#1f2937')
 
 def _pdf_footer(canvas,doc):
     canvas.saveState()
     page_h=doc.pagesize[1]
-    canvas.setStrokeColor(HexColor('#d6def2'))
-    canvas.setLineWidth(0.6)
-    canvas.line(doc.leftMargin,page_h-doc.topMargin-2,doc.width+doc.leftMargin,page_h-doc.topMargin-2)
+    # top accent rule
+    canvas.setStrokeColor(HexColor('#e2e8f0')); canvas.setLineWidth(0.6)
+    canvas.line(doc.leftMargin,page_h-doc.topMargin-1,doc.width+doc.leftMargin,page_h-doc.topMargin-1)
+    # footer band
+    canvas.setFillColor(HexColor('#f1f5f9'))
+    canvas.rect(doc.leftMargin-6,doc.bottomMargin-26,doc.width+12,26,stroke=0,fill=1)
+    canvas.setStrokeColor(_BRAND); canvas.setLineWidth(1.6)
+    canvas.line(doc.leftMargin-6,doc.bottomMargin-0,doc.width+doc.leftMargin+6,doc.bottomMargin-0)
     canvas.setFont(_F(False),7)
-    canvas.setFillColor(HexColor('#94a3b8'))
-    canvas.drawString(doc.leftMargin,doc.bottomMargin-14,'Intent, Entity & Semantic Intelligence Platform')
-    canvas.drawRightString(doc.width+doc.leftMargin,doc.bottomMargin-14,'Page %d'%(doc.page))
+    canvas.setFillColor(_TXT_MUT)
+    canvas.drawString(doc.leftMargin,doc.bottomMargin-16,'Intent, Entity & Semantic Intelligence Platform  \u00b7  Real-Time 21-Module Analysis')
+    canvas.drawRightString(doc.width+doc.leftMargin,doc.bottomMargin-16,'Page %d'%(doc.page))
     canvas.restoreState()
+
+def _cover_page(canvas,doc,title,mode,target,brand,now,exec_stats):
+    canvas.saveState()
+    w,h=doc.pagesize
+    # ---- Full-bleed hero: layered navy bands with a clean angled accent ----
+    canvas.setFillColor(_NAVY)
+    canvas.rect(0,h-235,w,235,stroke=0,fill=1)
+    canvas.setFillColor(_NAVY2)
+    canvas.rect(0,h-235,w,235,stroke=0,fill=1)
+    # diagonal indigo slash (modern geometric accent)
+    p=canvas.beginPath()
+    p.moveTo(0,h-235); p.lineTo(w,h-196); p.lineTo(w,h-226); p.lineTo(0,h-265); p.close()
+    canvas.setFillColor(_BRAND_DARK); canvas.drawPath(p,stroke=0,fill=1)
+    p2=canvas.beginPath()
+    p2.moveTo(0,h-262); p2.lineTo(w,h-223); p2.lineTo(w,h-230); p2.lineTo(0,h-269); p2.close()
+    canvas.setFillColor(_BRAND); canvas.drawPath(p2,stroke=0,fill=1)
+    # subtle grid dots (professional texture, not childish circles)
+    canvas.setFillColor(HexColor('#334155'))
+    for gx in range(int(40),int(w-20),44):
+        for gy in range(int(h-205),int(h-40),40):
+            canvas.circle(gx,gy,1.1,stroke=0,fill=1)
+    # gold accent line
+    canvas.setFillColor(_GOLD)
+    canvas.rect(40,h-198,w-80,3,stroke=0,fill=1)
+    # Brand wordmark
+    canvas.setFont(_F(True),8); canvas.setFillColor(HexColor('#a5b4fc'))
+    canvas.drawString(40,h-150,'INTENT  \u00b7  ENTITY  \u00b7  SEMANTIC INTELLIGENCE PLATFORM')
+    # Title block
+    canvas.setFont(_F(True),30); canvas.setFillColor(HexColor('#ffffff'))
+    canvas.drawString(40,h-178,'Content Intelligence Report')
+    canvas.setFont(_F(False),12.5); canvas.setFillColor(HexColor('#c7d2fe'))
+    canvas.drawString(40,h-198,'Real-Time 21-Module Analysis  \u00b7  Generated: %s'%now)
+    # ---- Body metadata as clean label/value rows ----
+    y=h-268
+    def meta_line(label,val,yloc):
+        canvas.setFillColor(_BRAND)
+        canvas.rect(40,yloc-4,4,26,stroke=0,fill=1)
+        canvas.setFont(_F(True),7); canvas.setFillColor(_TXT_MUT)
+        canvas.drawString(54,yloc+13,label.upper())
+        canvas.setFont(_F(False),11.5); canvas.setFillColor(_TXT_DARK)
+        canvas.drawString(54,yloc-1,(val or 'N/A')[:90])
+    meta_line('Analysis Mode',mode,y); y-=46
+    meta_line('Target',target,y); y-=46
+    meta_line('Brand',brand or 'N/A',y); y-=46
+    meta_line('Modules Executed',str(exec_stats[0])+' of 21',y)
+    # ---- Stat cards strip (clean white cards, colored top rule) ----
+    cards=[('Modules',exec_stats[0],_BRAND),
+           ('Critical',exec_stats[1],_ERR_RED),
+           ('High Priority',exec_stats[2],_WARN_AMBER),
+           ('Recommendations',exec_stats[3],_OK_GREEN)]
+    cw=(w-80-3*16)/4
+    for i,(lbl,val,col) in enumerate(cards):
+        x=40+i*(cw+16)
+        canvas.setFillColor(_CARD_BG)
+        canvas.roundRect(x,56,cw,66,8,stroke=0,fill=1)
+        canvas.setStrokeColor(_CARD_BORDER); canvas.setLineWidth(0.8)
+        canvas.roundRect(x,56,cw,66,8,stroke=1,fill=0)
+        canvas.setFillColor(col)
+        canvas.roundRect(x,56,cw,4,2,stroke=0,fill=1)
+        canvas.setFont(_F(True),22); canvas.setFillColor(_INK)
+        canvas.drawCentredString(x+cw/2,92,str(val))
+        canvas.setFont(_F(False),7.5); canvas.setFillColor(_TXT_MUT)
+        canvas.drawCentredString(x+cw/2,76,lbl.upper())
+    # Footnote
+    canvas.setFillColor(_ACCENT)
+    canvas.roundRect(40,22,w-80,22,5,stroke=0,fill=1)
+    canvas.setFont(_F(False),7.0); canvas.setFillColor(HexColor('#ecfeff'))
+    canvas.drawString(50,28,'All module outputs derive from live research: SERP, Wikidata, Wayback Machine, competitor analysis, HTTP, structured data & verified statistics.')
+    canvas.restoreState()
+
+def _section_banner(story,styles,no,title):
+    nos=ParagraphStyle('n',fontName=_F(True),fontSize=12,textColor=HexColor('#ffffff'))
+    tits=ParagraphStyle('t2',fontName=_F(True),fontSize=14,leading=18,textColor=HexColor('#ffffff'))
+    t=Table([[Paragraph('<font color="#ffffff">%s</font>'%_esc_pdf(no),nos),
+              Paragraph('<font color="#ffffff">%s</font>'%_esc_pdf(title),tits)]],
+        colWidths=[34,None],hAlign='LEFT')
+    t.setStyle(TableStyle([('BACKGROUND',(0,0),(0,0),_BRAND_DARK),
+                           ('BACKGROUND',(1,0),(1,0),_BRAND),
+                           ('VALIGN',(0,0),(-1,-1),'MIDDLE'),
+                           ('TOPPADDING',(0,0),(-1,-1),9),('BOTTOMPADDING',(0,0),(-1,-1),9),
+                           ('LEFTPADDING',(0,0),(0,0),0),('LEFTPADDING',(1,0),(1,0),12),
+                           ('RIGHTPADDING',(0,0),(-1,-1),12),
+                           ('BOX',(0,0),(-1,-1),0.5,HexColor('#312e81'))]))
+    story.append(t)
+    story.append(Spacer(1,8))
 
 def _add_heading(story,styles,text,kind='h2'):
     story.append(KeepTogether([Paragraph(text,styles[kind])]))
 
-def _add_table(story,rows,styles,width,maxrows=30):
+def _add_table(story,rows,styles,width,maxrows=40):
     if not rows: return
     keys=[];seen=set()
     for r in rows:
@@ -166,59 +452,116 @@ def _add_table(story,rows,styles,width,maxrows=30):
     all_keys=keys
     if len(keys)>6: keys=keys[:6]
     data=[[Paragraph(_pretty(k),styles['th']) for k in keys]]
+    cell_texts={k:[] for k in keys}
     for r in rows[:maxrows]:
-        data.append([Paragraph(_txt(r.get(k,'')),styles['cell']) for k in keys])
-    t=Table(data,repeatRows=1,colWidths=[width/len(keys)]*len(keys),hAlign='LEFT')
+        rowcells=[]
+        for k in keys:
+            v=r.get(k,'')
+            cell_texts[k].append(_txt(v))
+            p=ParagraphStyle('c',fontName=_F(False),fontSize=8.2,leading=11.5,textColor=_status_color(v) if isinstance(v,str) and len(str(v))<40 else _TXT_DARK,splitLongWords=1)
+            rowcells.append(Paragraph(_txt(v),p))
+        data.append(rowcells)
+    # Proportional column widths: weight by content length (min 15%, max 40%)
+    lengths=[max(len(_pretty(keys[i])), max((len(t) for t in cell_texts[keys[i]]), default=0)) for i in range(len(keys))]
+    total=sum(lengths) or 1
+    col_widths=[max(width*0.12, min(width*0.42, width*(l/total))) for l in lengths]
+    # Normalize so the total exactly equals the available width
+    scale=width/sum(col_widths)
+    col_widths=[w*scale for w in col_widths]
+    t=Table(data,repeatRows=1,colWidths=col_widths,hAlign='LEFT')
     cmds=[
-        ('GRID',(0,0),(-1,-1),0.4,HexColor('#cbd5e1')),
-        ('BACKGROUND',(0,0),(-1,0),HexColor('#5b21b6')),
+        ('GRID',(0,0),(-1,-1),0.4,_TBL_LINE),
+        ('BACKGROUND',(0,0),(-1,0),_TBL_HEAD),
         ('VALIGN',(0,0),(-1,-1),'TOP'),
-        ('LEFTPADDING',(0,0),(-1,-1),5),
-        ('RIGHTPADDING',(0,0),(-1,-1),5),
-        ('TOPPADDING',(0,0),(-1,-1),4),
-        ('BOTTOMPADDING',(0,0),(-1,-1),4),
+        ('LEFTPADDING',(0,0),(-1,-1),7),('RIGHTPADDING',(0,0),(-1,-1),7),
+        ('TOPPADDING',(0,0),(-1,-1),6),('BOTTOMPADDING',(0,0),(-1,-1),6),
+        ('LINEBELOW',(0,0),(-1,0),1.2,_BRAND_DARK),
     ]
     for i in range(1,len(data)):
         if i%2==0:
-            cmds.append(('BACKGROUND',(0,i),(-1,i),HexColor('#f5f7ff')))
+            cmds.append(('BACKGROUND',(0,i),(-1,i),_TBL_ALT))
     t.setStyle(TableStyle(cmds))
     story.append(t)
     notes=[]
     if len(rows)>maxrows:
-        notes.append('+ %d more rows (full details in the JSON appendix)'%(len(rows)-maxrows))
+        notes.append('+ %d more rows (full data in appendix)'%(len(rows)-maxrows))
     if len(all_keys)>len(keys):
-        notes.append('+ %d more fields (full details in the JSON appendix)'%(len(all_keys)-len(keys)))
+        notes.append('+ %d more fields (in appendix)'%(len(all_keys)-len(keys)))
     if notes:
         story.append(Paragraph(' &nbsp; '.join(notes),styles['note']))
 
-def _add_content(story,data,styles,depth=0):
-    if depth>4: return
+def _add_kv(story,styles,items,width):
+    rows=[]
+    for k,v in items:
+        lbl=Paragraph(_pretty(k),ParagraphStyle('l',fontName=_F(True),fontSize=8,leading=11,textColor=_TXT_DARK))
+        valp=ParagraphStyle('v',fontName=_F(False),fontSize=8.4,leading=11.5,textColor=_status_color(v) if isinstance(v,str) and len(str(v))<40 else _TXT_DARK,splitLongWords=1)
+        val=Paragraph(_txt(v),valp)
+        rows.append([lbl,val])
+    t=Table(rows,colWidths=[width*0.38,width*0.62],hAlign='LEFT')
+    cmds=[('GRID',(0,0),(-1,-1),0.4,_TBL_LINE),
+          ('VALIGN',(0,0),(-1,-1),'TOP'),
+          ('LEFTPADDING',(0,0),(-1,-1),6),('RIGHTPADDING',(0,0),(-1,-1),6),
+          ('TOPPADDING',(0,0),(-1,-1),4),('BOTTOMPADDING',(0,0),(-1,-1),4),
+          ('BACKGROUND',(0,0),(0,-1),HexColor('#f8fafc'))]
+    t.setStyle(TableStyle(cmds))
+    story.append(t)
+
+def _add_content(story,data,styles,depth=0,width=0):
+    if depth>5: return
     if isinstance(data,dict):
+        scalars=[];nested=[];lists=[];tail=[]
         for k,v in data.items():
-            if k in ('raw_html',): continue
-            if isinstance(v,dict):
+            if k in ('raw_html','page_text','recommendation_playbook','score_benchmarks','live_verified_statistics'): continue
+            if k in ('recommendations','implementation_steps','where_to_add'):
+                tail.append((k,v)); continue
+            if isinstance(v,dict): nested.append((k,v))
+            elif isinstance(v,list): lists.append((k,v))
+            else: scalars.append((k,v))
+        if scalars:
+            _add_kv(story,styles,scalars,width or _DEFAULT_PDF_WIDTH)
+            story.append(Spacer(1,4))
+        for k,v in lists:
+            if v and all(isinstance(x,dict) for x in v):
                 _add_heading(story,styles,_pretty(k),'h3')
-                _add_content(story,v,styles,depth+1)
-            elif isinstance(v,list):
-                if v and all(isinstance(x,dict) for x in v):
-                    _add_heading(story,styles,_pretty(k),'h3')
-                    _add_table(story,v,styles,story_width,maxrows=30)
-                else:
-                    story.append(Paragraph('<b>'+_pretty(k)+':</b>',styles['body']))
-                    for item in v:
-                        story.append(Paragraph('&#8226; '+_txt(item),styles['body']))
+                _add_table(story,v,styles,width or _DEFAULT_PDF_WIDTH)
             else:
-                story.append(Paragraph('<b>'+_pretty(k)+':</b> '+_txt(v),styles['body']))
+                _add_heading(story,styles,_pretty(k),'h3')
+                for item in v:
+                    story.append(Paragraph('&#8226; '+_txt(item),styles['body']))
+        for k,v in nested:
+            if depth>=3:
+                _add_heading(story,styles,_pretty(k),'h4')
+                _add_kv(story,styles,list(v.items()),width or _DEFAULT_PDF_WIDTH)
+            else:
+                _add_heading(story,styles,_pretty(k),'h3')
+                _add_content(story,v,styles,depth+1,width or _DEFAULT_PDF_WIDTH)
+        for k,v in tail:
+            if isinstance(v,list) and v and all(isinstance(x,dict) for x in v):
+                _add_heading(story,styles,_pretty(k),'h3')
+                _add_table(story,v,styles,width or _DEFAULT_PDF_WIDTH)
+            elif isinstance(v,list):
+                _add_heading(story,styles,_pretty(k),'h3')
+                for item in v:
+                    story.append(Paragraph('&#8226; '+_txt(item),styles['body']))
+            else:
+                _add_heading(story,styles,_pretty(k),'h3')
+                _add_kv(story,styles,list(v.items()),width or _DEFAULT_PDF_WIDTH)
     elif isinstance(data,list):
         for item in data:
-            story.append(Paragraph('&#8226; '+_txt(item),styles['body']))
+            if isinstance(item,dict):
+                _add_kv(story,styles,list(item.items()),width or _DEFAULT_PDF_WIDTH)
+            else:
+                story.append(Paragraph('&#8226; '+_txt(item),styles['body']))
     else:
         story.append(Paragraph(_txt(data),styles['body']))
 
-def _add_section(story,styles,title,data):
+def _add_section(story,styles,title,data,width=0):
     story.append(KeepTogether([Paragraph(title,styles['h2']),
-                               HRFlowable(width='100%',thickness=1.2,color=HexColor('#7c5cfc'),spaceBefore=2,spaceAfter=8)]))
-    _add_content(story,data,styles)
+                               HRFlowable(width='100%',thickness=1.2,color=_BRAND,spaceBefore=2,spaceAfter=8)]))
+    if isinstance(data,dict) and not data:
+        story.append(Paragraph('<i>No data produced for this section.</i>',styles['note']))
+    else:
+        _add_content(story,data,styles,width=width or _DEFAULT_PDF_WIDTH)
 
 def _add_raw_json(story,styles,raw):
     if not raw: return
@@ -234,75 +577,193 @@ def _add_raw_json(story,styles,raw):
         story.append(Paragraph(_esc_pdf(chunk).replace('\n','<br/>'),styles['raw']))
         story.append(Spacer(1,4))
 
-story_width=0
+_DEFAULT_PDF_WIDTH=440  # thread-safe fallback; real width passed explicitly per-report
+
+from reportlab.platypus.tableofcontents import TableOfContents
+
+class _TocDocTemplate(SimpleDocTemplate):
+    """SimpleDocTemplate that registers headings into a TableOfContents."""
+    def afterFlowable(self, flowable):
+        if isinstance(flowable,Paragraph):
+            style=flowable.style.name if flowable.style else ''
+            if style=='TOCHeading1':
+                self.notify('TOCEntry',(0,flowable.getPlainText(),self.page))
+
+def _make_toc():
+    toc=TableOfContents()
+    toc.levelStyles=[ParagraphStyle(name='TOCHeading1',fontName=_F(True),fontSize=10.5,leading=17,textColor=_TXT_DARK)]
+    toc.dotsMinLevel=0
+    return toc
+
+def _bench_target(b):
+    """Format a benchmark target for PDF display."""
+    try:
+        t=b.get('target')
+        if t is None: return 'N/A'
+        if b.get('scale')=='0-100':
+            return '%g'%t
+        return ('%g'%t) if t>1.5 else ('%d%%'%round(t*100))
+    except Exception:
+        return 'N/A'
 
 def build_report_pdf(results):
     if not results: results={}
     buf=io.BytesIO()
     styles=_make_styles()
-    doc=SimpleDocTemplate(buf,pagesize=A4,leftMargin=16*mm,rightMargin=16*mm,topMargin=18*mm,bottomMargin=18*mm,
-                          title='Content Intelligence Report',author='Intent, Entity & Semantic Intelligence Platform',
-                          subject='21-Module Content Analysis Report')
-    global story_width
-    story_width=doc.width
+    doc=_TocDocTemplate(buf,pagesize=A4,leftMargin=16*mm,rightMargin=16*mm,topMargin=18*mm,bottomMargin=32*mm,
+                        title='Content Intelligence Report',author='Intent, Entity & Semantic Intelligence Platform',
+                        subject='21-Module Content Analysis Report')
+    # thread-safe: local width only (no globals)
+    # Reportlab's default frame applies 6pt left + 6pt right padding, so the
+    # usable width for flowables is doc.width - 12. Sizing tables to doc.width
+    # made every table 12pt too wide and overflow the right margin.
+    usable_width=doc.width - 12
     story=[]
     blueprint=results.get('blueprint') or {}
     module_results=results.get('module_results') or {}
     url_data=results.get('_url_data') or {}
     now=datetime.datetime.now().strftime('%Y-%m-%d %H:%M:%S')
-    story.append(Paragraph('Content Intelligence Report',styles['title']))
-    story.append(Paragraph('Intent, Entity &amp; Semantic Intelligence Platform',styles['tbrand']))
-    story.append(HRFlowable(width='100%',thickness=2.4,color=HexColor('#7c5cfc'),spaceBefore=3,spaceAfter=8))
     mode='URL Analysis' if url_data else 'Keyword / Manual Analysis'
     target=url_data.get('url') or results.get('entity') or results.get('seed') or 'N/A'
     brand=results.get('brand') or ''
-    story.append(Paragraph('<b>Generated:</b> %s &nbsp;&nbsp;<b>Mode:</b> %s'%(_esc_pdf(now),_esc_pdf(mode)),styles['sub']))
-    story.append(Paragraph('<b>Target:</b> %s'%_esc_pdf(target),styles['sub']))
-    if brand:
-        story.append(Paragraph('<b>Brand:</b> %s'%_esc_pdf(brand),styles['sub']))
-    story.append(Spacer(1,10))
     es=(blueprint.get('executive_summary') or {})
-    stats=[('Modules Executed',es.get('total_modules_executed') or len(module_results)),
-           ('Critical Issues',es.get('critical_issues_count') or 0),
-           ('High Priority',es.get('high_priority_count') or 0),
-           ('Recommendations',es.get('total_recommendations') or 0)]
-    tdata=[[Paragraph(l,styles['statlbl']) for l,_ in stats],
-           [Paragraph(_esc_pdf(str(v)),styles['statval']) for _,v in stats]]
-    tw=doc.width/len(stats)
-    t=Table(tdata,colWidths=[tw]*len(stats),hAlign='LEFT')
-    t.setStyle(TableStyle([('BOX',(0,0),(-1,-1),0.6,HexColor('#cbd5e1')),
-                           ('INNERGRID',(0,0),(-1,-1),0.4,HexColor('#e2e8f0')),
-                           ('TOPPADDING',(0,0),(-1,-1),7),
-                           ('BOTTOMPADDING',(0,0),(-1,-1),7),
-                           ('LEFTPADDING',(0,0),(-1,-1),5),
-                           ('RIGHTPADDING',(0,0),(-1,-1),5)]))
-    story.append(t)
-    _add_section(story,styles,'1. Executive Summary',es)
-    secs=[('output_1_editorial_blueprint','2. Editorial & Writing Blueprint'),
-          ('output_2_geo_optimization','3. GEO & AEO Optimization'),
-          ('output_3_technical_payload','4. Technical Payload'),
-          ('output_4_cdn_deployment','5. CDN & Edge Deployment'),
-          ('output_5_sentinel_brief','6. Post-Publish Sentinel Brief')]
-    for key,title in secs:
-        sec=blueprint.get(key)
-        if sec:
-            _add_section(story,styles,title,sec)
+    exec_stats=(es.get('total_modules_executed') or len(module_results),es.get('critical_issues_count') or 0,es.get('high_priority_count') or 0,es.get('total_recommendations') or 0)
+
+    # ---- Cover page (drawn via canvas; story starts on page 2) ----
+    def _first_page(canvas,doc):
+        _cover_page(canvas,doc,'',mode,target,brand,now,exec_stats)
+
+    # ---- Table of Contents page (page 2: page 1 is the canvas-drawn cover) ----
     story.append(PageBreak())
-    story.append(KeepTogether([Paragraph('7. Module Results',styles['h2']),
-                               HRFlowable(width='100%',thickness=1.2,color=HexColor('#7c5cfc'),spaceBefore=2,spaceAfter=8)]))
+    story.append(Paragraph('Contents',styles['tocc']))
+    story.append(HRFlowable(width='100%',thickness=1.6,color=_BRAND,spaceBefore=2,spaceAfter=10))
+    toc=_make_toc()
+    story.append(toc)
+    story.append(Spacer(1,16))
+    meta=results.get('blueprint',{}).get('blueprint_metadata',{})
+    _add_kv(story,styles,[
+        ('Generated',now),('Mode',mode),('Target',target),('Brand',brand or 'N/A'),
+        ('Locale',meta.get('target_locale','en-US')),('Entity',meta.get('target_entity','')),
+        ('Query',meta.get('target_query','')),('Competitors Analyzed',results.get('analysis_metadata',{}).get('competitors_analyzed',0)),
+        ('SERP Results Fetched',results.get('analysis_metadata',{}).get('serp_results_fetched',0)),
+        ('Modules Completed',es.get('total_modules_executed') or len(module_results)),
+    ],usable_width)
+    story.append(PageBreak())
+
+    # ---- 1. Executive Summary ----
+    story.append(Paragraph('1. Executive Summary',styles['TOCHeading1']))
+    story.append(HRFlowable(width='100%',thickness=0.8,color=_BRAND,spaceBefore=1,spaceAfter=8))
+    stats=[('Modules Executed',es.get('total_modules_executed') or len(module_results),_BRAND),
+           ('Critical Issues',es.get('critical_issues_count') or 0,_ERR_RED),
+           ('High Priority',es.get('high_priority_count') or 0,_WARN_AMBER),
+           ('Recommendations',es.get('total_recommendations') or 0,_OK_GREEN)]
+    tw=usable_width/len(stats)
+    tdata=[]
+    row1=[];row2=[]
+    for lbl,val,col in stats:
+        row1.append(Paragraph(_esc_pdf(lbl),styles['statlbl']))
+        row2.append(Paragraph('<font color="#ffffff"><b>%s</b></font>'%_esc_pdf(str(val)),styles['statval']))
+    tdata=[row1,row2]
+    t=Table(tdata,colWidths=[tw]*len(stats),hAlign='LEFT')
+    cmds=[('VALIGN',(0,0),(-1,-1),'MIDDLE'),
+          ('TOPPADDING',(0,0),(-1,-1),8),('BOTTOMPADDING',(0,0),(-1,-1),8),
+          ('LEFTPADDING',(0,0),(-1,-1),6),('RIGHTPADDING',(0,0),(-1,-1),6)]
+    for i,(lbl,val,col) in enumerate(stats):
+        cmds.append(('BACKGROUND',(i,1),(i,1),col))
+        cmds.append(('BACKGROUND',(i,0),(i,0),HexColor('#f1f5f9')))
+        cmds.append(('LINEBELOW',(i,0),(i,0),3,col))
+    t.setStyle(TableStyle(cmds))
+    story.append(t)
+    story.append(Spacer(1,10))
+    _section_banner(story,styles,'1','Executive Summary')
+    _add_section(story,styles,'',es,width=usable_width)
+    story.append(PageBreak())
+
+    # ---- 2-6 blueprint sections ----
+    secs=[('output_1_editorial_blueprint','2','Editorial & Writing Blueprint'),
+          ('output_2_geo_optimization','3','GEO & AEO Optimization'),
+          ('output_3_technical_payload','4','Technical Payload'),
+          ('output_4_cdn_deployment','5','CDN & Edge Deployment'),
+          ('output_5_sentinel_brief','6','Post-Publish Sentinel Brief')]
+    for key,no,title in secs:
+        sec=blueprint.get(key)
+        story.append(Paragraph('%s. %s'%(no,title),styles['TOCHeading1']))
+        story.append(HRFlowable(width='100%',thickness=0.8,color=_BRAND,spaceBefore=1,spaceAfter=8))
+        _section_banner(story,styles,no,title)
+        if sec:
+            _add_content(story,sec,styles,width=usable_width)
+        else:
+            story.append(Paragraph('<i>No data produced for this section.</i>',styles['note']))
+        story.append(PageBreak())
+
+    # ---- 7. Module Results ----
+    story.append(Paragraph('7. Module Results (M01 - M21)',styles['TOCHeading1']))
+    story.append(HRFlowable(width='100%',thickness=0.8,color=_BRAND,spaceBefore=1,spaceAfter=8))
+    _section_banner(story,styles,'7','Module Results (M01 - M21)')
+    story.append(Spacer(1,6))
+    first_module=True
     for i in range(1,22):
         k='M%02d'%i
         mr=module_results.get(k)
         if not mr: continue
-        _add_heading(story,styles,'Module %d: %s'%(i,_MODULE_NAMES.get(k,k)),'h3')
-        if isinstance(mr,dict) and mr.get('error'):
-            story.append(Paragraph('Error: '+_txt(mr['error']),styles['body']))
+        if first_module:
+            first_module=False
         else:
-            _add_content(story,mr,styles)
-    story.append(PageBreak())
-    story.append(KeepTogether([Paragraph('8. Full JSON Export',styles['h2']),
-                               HRFlowable(width='100%',thickness=1.2,color=HexColor('#7c5cfc'),spaceBefore=2,spaceAfter=8)]))
-    story.append(Paragraph('Complete raw data used to generate this report.',styles['body']))
+            story.append(PageBreak())
+        hdr=Table([[Paragraph('<font color="#ffffff">MODULE %d</font>'%i,ParagraphStyle('n',fontName=_F(True),fontSize=8,textColor=HexColor('#ffffff'))),
+                    Paragraph('<font color="#ffffff">%s</font>'%_esc_pdf(_MODULE_NAMES.get(k,k)),ParagraphStyle('t2',fontName=_F(True),fontSize=12,leading=16,textColor=HexColor('#ffffff')))]],
+                   colWidths=[usable_width*0.18,usable_width*0.82],hAlign='LEFT')
+        hdr.setStyle(TableStyle([('BACKGROUND',(0,0),(0,0),_BRAND_DARK),
+                                 ('BACKGROUND',(1,0),(1,0),_BRAND),
+                                 ('VALIGN',(0,0),(-1,-1),'MIDDLE'),
+                                 ('TOPPADDING',(0,0),(-1,-1),6),('BOTTOMPADDING',(0,0),(-1,-1),6),
+                                 ('LEFTPADDING',(0,0),(0,0),0),('LEFTPADDING',(1,0),(1,0),10),
+                                 ('RIGHTPADDING',(0,0),(-1,-1),10),
+                                 ('BOX',(0,0),(-1,-1),0.5,_BRAND_DARK)]))
+        story.append(hdr)
+        story.append(Spacer(1,4))
+        if isinstance(mr,dict) and mr.get('error'):
+            story.append(Paragraph('<font color="#dc2626"><b>Error:</b> %s</font>'%_esc_pdf(mr['error']),styles['body']))
+        else:
+            _add_content(story,mr,styles,depth=0,width=usable_width)
+        if isinstance(mr,dict):
+            sb=mr.get('score_benchmarks') or []
+            if sb:
+                story.append(Paragraph('Score Benchmarks - what to aim for',styles['h3']))
+                rows=[{'Score':b.get('key',''),'Your Value':b.get('value'),'Target':_bench_target(b),'Level':str(b.get('level','')).upper(),'Rankings':b.get('rankings',''),'AI Overview':b.get('ai_overview',''),'AI Citations':b.get('ai_citation','')} for b in sb[:12]]
+                _add_table(story,rows,styles,usable_width,maxrows=12)
+                story.append(Paragraph('Benchmarks are standard industry guidance (heuristic, unverified), not measured ranking guarantees.',styles['note']))
+            pb=mr.get('recommendation_playbook') or {}
+            if pb:
+                story.append(Paragraph('Recommendations & Action Plan (after analysis)',styles['h3']))
+                story.append(Paragraph('<b>What To Do</b>',styles['h4']))
+                for w in (pb.get('what_to_do') or []):
+                    story.append(Paragraph('&#8226; '+_txt(w),styles['body']))
+                story.append(Paragraph('<b>When To Do It</b>',styles['h4']))
+                for w in (pb.get('when_to_do') or []):
+                    story.append(Paragraph('&#8226; '+_txt(w),styles['body']))
+                tools=pb.get('tools_to_use') or []
+                if tools:
+                    story.append(Paragraph('<b>Tools To Use</b>',styles['h4']))
+                    _add_table(story,[{'Tool':t.get('tool',''),'How To Use':t.get('use','')} for t in tools],styles,usable_width)
+                ab=pb.get('ab_test_plan') or {}
+                if ab:
+                    story.append(Paragraph('<b>A/B Test Plan - how to verify it works</b>',styles['h4']))
+                    _add_kv(story,styles,[
+                        ('Hypothesis',ab.get('hypothesis','')),('Variant A',ab.get('variant_a','')),
+                        ('Variant B',ab.get('variant_b','')),('Metrics',', '.join(ab.get('metrics',[]) or [])),
+                        ('Duration (days)',ab.get('duration_days','')),('How To Judge',ab.get('check',''))],usable_width)
+        if isinstance(mr,dict):
+            lvs=mr.get('live_verified_statistics') or {}
+            if lvs.get('statistics'):
+                story.append(Paragraph('Live Verified Statistics (real, sourced)',styles['h3']))
+                _add_table(story,[{'#':i+1,'Statistic':s.get('stat',''),'Source':s.get('source_title','') or s.get('source_url','')} for i,s in enumerate(lvs['statistics'][:10])],styles,usable_width)
+
+    # ---- 8. Appendix ----
+    story.append(Paragraph('8. Full Data Appendix',styles['TOCHeading1']))
+    story.append(HRFlowable(width='100%',thickness=0.8,color=_BRAND,spaceBefore=1,spaceAfter=8))
+    _section_banner(story,styles,'8','Full Data Appendix')
+    story.append(Paragraph('Complete raw data used to generate this report (programmatic use).',styles['body']))
     story.append(Spacer(1,6))
     export={k:v for k,v in results.items() if k!='_url_data'}
     if url_data:
@@ -311,171 +772,156 @@ def build_report_pdf(results):
         raw=json.dumps(export,ensure_ascii=False,indent=1,default=str)
     except Exception:
         raw=str(export)
-    if len(raw)>120000:
-        raw=raw[:120000]+'\n... [truncated]'
+    if len(raw)>200000:
+        raw=raw[:200000]+'\n... [truncated]'
     _add_raw_json(story,styles,raw)
-    doc.build(story,onFirstPage=_pdf_footer,onLaterPages=_pdf_footer)
+    doc.multiBuild(story,onFirstPage=_first_page,onLaterPages=_pdf_footer)
     buf.seek(0)
     return buf.read()
 
 app=Flask(__name__)
+
+@app.after_request
+def add_cors_headers(response):
+    response.headers['Access-Control-Allow-Origin'] = '*'
+    response.headers['Access-Control-Allow-Methods'] = 'GET, POST, OPTIONS'
+    response.headers['Access-Control-Allow-Headers'] = 'Content-Type, Accept'
+    response.headers['Access-Control-Max-Age'] = '3600'
+    try:
+        return _apply_security_headers(response)
+    except Exception:
+        return response
+
+@app.before_request
+def handle_preflight():
+    if request.method == 'OPTIONS':
+        response = app.make_default_options_response()
+        return response
 
 def web_search(query,num=5):
     """Real SERP retrieval (DuckDuckGo HTML). Returns list of result dicts."""
     res=_real_web_search(query,num)
     return res.get("results",[])
 
-def fetch_live_stats(entity):
-    """Fetch real statistics snippets via live search results."""
-    stats={}
-    queries=[
-        f"{entity} market size 2025 2026",
-        f"{entity} adoption rate enterprise",
-        f"{entity} ROI statistics",
-        f"{entity} comparison top solutions",
-        f"{entity} implementation cost average",
-    ]
-    for q in queries:
-        results=web_search(q,3)
-        if results:
-            stats[q]=results
-    return stats
-
 @app.route('/')
 def index():
-    return Response(INDEX_HTML,mimetype='text/html')
+    return Response(INDEX_HTML,mimetype='text/html',headers={'Cache-Control':'public, max-age=60'})
 
-@app.route('/api/analyze',methods=['POST'])
+@app.route('/api/progress/<analysis_id>',methods=['GET','OPTIONS'])
+def api_progress(analysis_id):
+    if request.method == 'OPTIONS':
+        return jsonify({'ok': True})
+    rec=_PROGRESS_STORE.get(analysis_id)
+    if not rec:
+        return jsonify({'ok':False,'error':'Unknown or expired analysis session. Please run a new analysis.'}),404
+    # Return a copy so callers can't mutate the live store
+    return jsonify({
+        'ok':True,
+        'analysis_id':analysis_id,
+        'phase':rec.get('phase',''),
+        'phase_label':rec.get('phase_label',''),
+        'current_module':rec.get('current_module'),
+        'current_module_name':rec.get('current_module_name',''),
+        'module_status':dict(rec.get('module_status',{})),
+        'completed_modules':list(rec.get('completed_modules',[])),
+        'errors':list(rec.get('errors',[])),
+        'percent':rec.get('percent',0),
+        'done':rec.get('done',False),
+        'started_at':rec.get('started_at'),
+        'updated_at':rec.get('updated_at'),
+    })
+
+@app.route('/api/analyze',methods=['POST','OPTIONS'])
 def api_analyze():
+    if request.method == 'OPTIONS':
+        return jsonify({'ok': True})
+    ok_rl, msg_rl = check_rate_limit(_client_ip(), "analyze", 20, 3600)
+    if not ok_rl:
+        return jsonify({"error": msg_rl}), 429
     try:
-        data=request.json
+        data=request.get_json(silent=True)
+        valid, vmsg = validate_json_dict(data)
+        if not valid:
+            return jsonify({"error": vmsg}),400
+        analysis_id=str(data.get('analysis_id') or ('an_%06d' % secrets.randbelow(10**6)))
+        progress=_make_progress_recorder(analysis_id)
         fw=InputFramework()
         fw.seed=SeedKeywordInput(
-            seed_phrase=data.get('seed',''),
-            primary_entity=data.get('entity',''),
+            seed_phrase=str(data.get('seed',''))[:200],
+            primary_entity=str(data.get('entity',''))[:200],
             target_locale=data.get('locale','en-US'),
             target_device=data.get('device','desktop'),
-            secondary_keywords=[k.strip() for k in data.get('secondary','').split(',') if k.strip()],
+            secondary_keywords=[k.strip()[:80] for k in str(data.get('secondary',''))[:1000].split(',') if k.strip()][:20],
         )
         fw.brand=BrandConstraints(
-            brand_name=data.get('brand','Default'),
+            brand_name=str(data.get('brand','Default'))[:120],
             voice_profile=data.get('voice','authoritative'),
-            do_not_say_terms=[t.strip() for t in data.get('blacklist','').split(',') if t.strip()],
+            do_not_say_terms=[t.strip()[:80] for t in str(data.get('blacklist',''))[:1000].split(',') if t.strip()][:30],
         )
         fw.audience=AudienceProfile(
             funnel_stage=data.get('funnel','middle'),
             knowledge_floor=data.get('knowledge','intermediate'),
         )
         fw.technical=TechnicalCredentials(render_mode='ssr',js_framework='',cdn_provider='')
-        fw.seed.brand_website=data.get('website','')
-        sme=data.get('sme','')
+        fw.seed.brand_website=str(data.get('website',''))[:2048]
+        if fw.seed.brand_website:
+            allowed, reason = is_url_allowed(fw.seed.brand_website)
+            if not allowed:
+                return jsonify({"error": f"Brand website blocked: {reason}"}),400
+        sme=str(data.get('sme',''))[:8000]
         if sme:
-            for n in sme.split('|'):
-                n=n.strip()
+            for n in sme.split('|')[:10]:
+                n=n.strip()[:2000]
                 if n: fw.first_party.sme_assets.append(SMEAsset(content=n,expert_name="SME",expert_title="Expert"))
         errs=fw.validate_all()
         if errs: return jsonify({"error":errs}),400
         engine=PlatformEngine()
-        results=engine.run_analysis(fw)
+        results=engine.run_analysis(fw, progress_callback=progress)
+        _mark_progress_done(analysis_id, results.get('errors',{}))
+        results['analysis_id']=analysis_id
+        results['server_version']=APP_VERSION
         return jsonify(results)
     except Exception as e:
-        return jsonify({"error":str(e),"trace":traceback.format_exc()}),500
+        if 'analysis_id' in locals():
+            _mark_progress_done(analysis_id, {'server':str(e)[:300]})
+        return _safe_error("Analysis failed", e, 500)
 
-@app.route('/api/analyze-url',methods=['POST'])
+@app.route('/api/analyze-url',methods=['POST','OPTIONS'])
 def api_analyze_url():
+    if request.method == 'OPTIONS':
+        return jsonify({'ok': True})
+    ok_rl, msg_rl = check_rate_limit(_client_ip(), "analyze-url", 20, 3600)
+    if not ok_rl:
+        return jsonify({"error": msg_rl}), 429
     try:
-        data=request.json
-        url=data.get('url','')
-        brand=data.get('brand','')
+        data=request.get_json(silent=True)
+        valid, vmsg = validate_json_dict(data)
+        if not valid:
+            return jsonify({"error": vmsg}),400
+        url=str(data.get('url',''))[:2048]
+        brand=str(data.get('brand',''))[:120]
         if not url: return jsonify({"error":"URL is required"}),400
-        import html.parser
-        class ContentExtractor(html.parser.HTMLParser):
-            def __init__(self):
-                super().__init__()
-                self.text_parts=[]
-                self.title=''
-                self.meta_desc=''
-                self.meta_keywords=''
-                self.h1=''
-                self.h2s=[]
-                self.in_title=False
-                self.in_h1=False
-                self.in_h2=False
-                self.in_script=False
-                self.in_style=False
-                self.in_nav=False
-                self.in_footer=False
-                self.current_tag=''
-                self.tag_stack=[]
-                self.link_count=0
-                self.image_count=0
-                self.images=[]
-                self.links=[]
-                self.schema_data=[]
-            def handle_starttag(self,tag,attrs):
-                self.tag_stack.append(tag)
-                attrs_dict=dict(attrs)
-                if tag=='title': self.in_title=True
-                if tag=='h1': self.in_h1=True
-                if tag=='h2': self.in_h2=True
-                if tag=='script':
-                    self.in_script=True
-                    if attrs_dict.get('type','')=='application/ld+json':
-                        self.schema_data.append('ld+json_found')
-                if tag=='style': self.in_style=True
-                if tag=='nav': self.in_nav=True
-                if tag=='footer': self.in_footer=True
-                if tag=='meta':
-                    name=attrs_dict.get('name','').lower()
-                    prop=attrs_dict.get('property','').lower()
-                    content=attrs_dict.get('content','')
-                    if name=='description' or prop=='og:description': self.meta_desc=content
-                    if name=='keywords': self.meta_keywords=content
-                if tag=='a':
-                    self.link_count+=1
-                    href=attrs_dict.get('href','')
-                    if href: self.links.append(href[:200])
-                if tag=='img':
-                    self.image_count+=1
-                    src=attrs_dict.get('src','')
-                    alt=attrs_dict.get('alt','')
-                    if src: self.images.append({'src':src[:200],'alt':alt})
-            def handle_endtag(self,tag):
-                if self.tag_stack and self.tag_stack[-1]==tag: self.tag_stack.pop()
-                if tag=='title': self.in_title=False
-                if tag=='h1': self.in_h1=False
-                if tag=='h2': self.in_h2=False
-                if tag=='script': self.in_script=False
-                if tag=='style': self.in_style=False
-                if tag=='nav': self.in_nav=False
-                if tag=='footer': self.in_footer=False
-            def handle_data(self,data):
-                text=data.strip()
-                if not text: return
-                if self.in_title: self.title=text
-                if self.in_h1: self.h1=text
-                if self.in_h2: self.h2s.append(text)
-                if not self.in_script and not self.in_style and not self.in_nav and not self.in_footer:
-                    if len(text)>15: self.text_parts.append(text)
-        try:
-            req=urllib.request.Request(url,headers={'User-Agent':'Mozilla/5.0 (compatible; ContentAnalyzer/1.0)'})
-            with urllib.request.urlopen(req,timeout=15) as resp:
-                html_content=resp.read().decode('utf-8',errors='ignore')
-        except Exception as fe:
-            return jsonify({"error":f"Failed to fetch URL: {str(fe)}"}),400
-        extractor=ContentExtractor()
-        try: extractor.feed(html_content)
-        except: pass
-        page_text=' '.join(extractor.text_parts)
+        allowed, reason = is_url_allowed(url)
+        if not allowed:
+            return jsonify({"error": f"URL blocked by SSRF guard: {reason}"}),400
+        analysis_id=str(data.get('analysis_id') or ('url_%06d' % secrets.randbelow(10**6)))
+        progress=_make_progress_recorder(analysis_id)
+        # Deduplicated parser: single shared extractor (web_data.extract_page).
+        fetched = safe_fetch(url, timeout=15, max_bytes=2000000)
+        if not fetched.get("ok"):
+            return jsonify({"error": f"Failed to fetch URL: {fetched.get('error','unknown')}"}),400
+        html_content = fetched.get("html", "")
+        meta = _extract_page_shared(html_content, url)
+        page_text = meta.get("page_text", "") or ""
         if len(page_text)<100:
             page_text=page_text+' (Minimal content extracted from URL. Analysis based on available text.)'
-        seed_words=extractor.title.split()[:5] if extractor.title else page_text.split()[:5]
-        seed_phrase=' '.join(seed_words)
-        entity=extractor.h1 if extractor.h1 else (extractor.title or 'the content')
+        seed_words=(meta.get("title","") or "").split()[:5] if meta.get("title") else page_text.split()[:5]
+        seed_phrase=' '.join(seed_words)[:200]
+        entity=(meta.get("h1") or "") if meta.get("h1") else (meta.get("title") or 'the content')
         fw=InputFramework()
         fw.seed=SeedKeywordInput(
             seed_phrase=seed_phrase,
-            primary_entity=entity,
+            primary_entity=str(entity)[:200],
             target_locale=data.get('locale','en-US'),
             target_device=data.get('device','desktop'),
             secondary_keywords=[],
@@ -490,32 +936,49 @@ def api_analyze_url():
         fw.technical=TechnicalCredentials(render_mode='ssr',js_framework='',cdn_provider='')
         engine=PlatformEngine()
         fw._url_mode=True
+        _links = meta.get("links", []) or []
+        _link_strs = []
+        for l in _links[:30]:
+            if isinstance(l, dict):
+                _link_strs.append((l.get("href") or "")[:200])
+            elif isinstance(l, str):
+                _link_strs.append(l[:200])
         fw._url_data={
             'url': url,
-            'title': extractor.title,
-            'meta_description': extractor.meta_desc,
-            'meta_keywords': extractor.meta_keywords,
-            'h1': extractor.h1,
-            'h2s': extractor.h2s,
-            'word_count': len(page_text.split()),
-            'link_count': extractor.link_count,
-            'image_count': extractor.image_count,
-            'images': extractor.images[:20],
-            'links': extractor.links[:30],
-            'has_schema': len(extractor.schema_data)>0,
+            'title': str(meta.get("title",""))[:300],
+            'meta_description': str(meta.get("meta_description",""))[:500],
+            'meta_keywords': str(meta.get("meta_keywords",""))[:300],
+            'h1': str(meta.get("h1",""))[:300],
+            'h2s': [str(x)[:200] for x in (meta.get("h2s") or [])[:20]],
+            'word_count': meta.get("word_count", 0),
+            'link_count': meta.get("link_count", 0),
+            'image_count': meta.get("image_count", 0),
+            'images': meta.get("images", [])[:20],
+            'links': [x for x in _link_strs if x],
+            'has_schema': bool(meta.get("has_schema")),
             'page_text': page_text[:5000],
             'raw_html': html_content[:200000],
-            'fetched_status': getattr(resp, 'status', 200),
+            'fetched_status': fetched.get("status", 200),
+            'fetched_final_url': (fetched.get("final_url") or url)[:500],
         }
-        results=engine.run_analysis(fw)
+        results=engine.run_analysis(fw, progress_callback=progress)
+        _mark_progress_done(analysis_id, results.get('errors',{}))
         results['_url_mode']=True
         results['_url_data']=fw._url_data
+        results['analysis_id']=analysis_id
+        results['server_version']=APP_VERSION
         return jsonify(results)
     except Exception as e:
-        return jsonify({"error":str(e),"trace":traceback.format_exc()}),500
-
-@app.route('/api/send_otp',methods=['POST'])
+        if 'analysis_id' in locals():
+            _mark_progress_done(analysis_id, {'server':str(e)[:300]})
+        return _safe_error("URL analysis failed", e, 500)
+@app.route('/api/send_otp',methods=['POST','OPTIONS'])
 def api_send_otp():
+    if request.method == 'OPTIONS':
+        return jsonify({'ok': True})
+    ok_rl, msg_rl = check_rate_limit(_client_ip(), "send_otp", 5, 3600)
+    if not ok_rl:
+        return jsonify({"error": msg_rl}), 429
     data=request.get_json(silent=True) or {}
     email=str(data.get('email') or '').strip().lower()
     if not _EMAIL_RE.match(email):
@@ -526,7 +989,7 @@ def api_send_otp():
         return jsonify({'error':'Too many OTP requests for this email. Please wait a few minutes and try again.'}),429
     if rec and (now-rec.get('req_first',now))>_OTP_WINDOW:
         _OTP_STORE.pop(email,None)
-    otp='%06d'%random.randint(0,999999)
+    otp='%06d' % secrets.randbelow(10**6)
     req_count=1 if not rec else rec.get('req_count',0)+1
     req_first=now if not rec else rec.get('req_first',now)
     _OTP_STORE[email]={'otp':otp,'exp':now+_OTP_TTL,'tries':0,'req_count':req_count,'req_first':req_first}
@@ -540,11 +1003,13 @@ def api_send_otp():
         _send_email(email,'Content Intelligence Platform - Your OTP Code',html)
     except Exception as e:
         _OTP_STORE.pop(email,None)
-        return jsonify({'error':'Could not send the OTP email: %s'%str(e)}),500
+        return _safe_error("Could not send the OTP email", e, 500)
     return jsonify({'ok':True,'message':'OTP sent to %s'%email})
 
-@app.route('/api/verify_and_send_report',methods=['POST'])
+@app.route('/api/verify_and_send_report',methods=['POST','OPTIONS'])
 def api_verify_and_send_report():
+    if request.method == 'OPTIONS':
+        return jsonify({'ok': True})
     data=request.get_json(silent=True) or {}
     email=str(data.get('email') or '').strip().lower()
     otp=str(data.get('otp') or '').strip()
@@ -563,10 +1028,12 @@ def api_verify_and_send_report():
         return jsonify({'error':'Incorrect OTP. %d attempt(s) remaining.'%left}),400
     _OTP_STORE.pop(email,None)
     results=data.get('report') or {}
+    if isinstance(results, dict) and len(json.dumps(results, default=str)) > 5_000_000:
+        return jsonify({"error": "Report payload too large (max ~5MB)"}), 413
     try:
         pdf=build_report_pdf(results)
     except Exception as e:
-        return jsonify({'error':'Could not generate the PDF report: %s'%str(e)}),500
+        return _safe_error("Could not generate the PDF report", e, 500)
     ts=datetime.datetime.now().strftime('%Y%m%d_%H%M%S')
     fname='content_intelligence_report_%s.pdf'%ts
     html=("<div style='font-family:Arial,sans-serif;padding:24px;background:#f5f7ff;border-radius:12px'>"
@@ -576,20 +1043,136 @@ def api_verify_and_send_report():
     try:
         _send_email(email,'Your Content Intelligence Report - %s'%ts,html,fname,pdf)
     except Exception as e:
-        return jsonify({'error':'Could not email the report: %s'%str(e)}),500
+        return _safe_error("Could not email the report", e, 500)
     return jsonify({'ok':True,'message':'Report sent to %s'%email})
 
-@app.route('/api/download_pdf',methods=['POST'])
+@app.route('/api/download_pdf',methods=['POST','OPTIONS'])
 def api_download_pdf():
+    if request.method == 'OPTIONS':
+        return jsonify({'ok': True})
+    ok_rl, msg_rl = check_rate_limit(_client_ip(), "download_pdf", 10, 3600)
+    if not ok_rl:
+        return jsonify({"error": msg_rl}), 429
     data=request.get_json(silent=True) or {}
     results=data.get('report') or {}
+    if isinstance(results, dict) and len(json.dumps(results, default=str)) > 5_000_000:
+        return jsonify({"error": "Report payload too large (max ~5MB)"}), 413
     try:
         pdf=build_report_pdf(results)
     except Exception as e:
-        return jsonify({'error':'Could not generate the PDF report: %s'%str(e)}),500
+        return _safe_error("Could not generate the PDF report", e, 500)
     ts=datetime.datetime.now().strftime('%Y%m%d_%H%M%S')
     fname='content_intelligence_report_%s.pdf'%ts
     return Response(pdf,mimetype='application/pdf',headers={'Content-Disposition':'attachment; filename=%s'%fname})
+
+# ---------------------------------------------------------------------------
+# Enterprise P0/P1 APIs: content score, brief, GSC quick wins, share links
+# ---------------------------------------------------------------------------
+_REPORT_STORE = {}
+_REPORT_LOCK = threading.Lock()
+
+@app.route('/api/score', methods=['POST', 'OPTIONS'])
+def api_score():
+    """Dual SEO+GEO content score (heuristic TF-IDF; no ML deps)."""
+    if request.method == 'OPTIONS':
+        return jsonify({'ok': True})
+    ok_rl, msg_rl = check_rate_limit(_client_ip(), "score", 60, 3600)
+    if not ok_rl:
+        return jsonify({"error": msg_rl}), 429
+    data = request.get_json(silent=True) or {}
+    draft = str(data.get("draft", ""))[:100000]
+    competitors = data.get("competitor_texts", []) or []
+    competitors = [str(c)[:50000] for c in competitors[:5]]
+    terms = [str(t)[:80] for t in (data.get("must_include_terms", []) or [])[:60]]
+    targets = data.get("targets", {}) or {}
+    if not draft.strip():
+        return jsonify({"error": "draft text is required"}), 400
+    try:
+        return jsonify(score_content(draft, competitors, terms, targets))
+    except Exception as e:
+        return _safe_error("Scoring failed", e, 500)
+
+@app.route('/api/brief', methods=['POST', 'OPTIONS'])
+def api_brief():
+    """SERP-driven brief generator from a prior analysis result."""
+    if request.method == 'OPTIONS':
+        return jsonify({'ok': True})
+    ok_rl, msg_rl = check_rate_limit(_client_ip(), "brief", 60, 3600)
+    if not ok_rl:
+        return jsonify({"error": msg_rl}), 429
+    data = request.get_json(silent=True) or {}
+    seed = str(data.get("seed", ""))[:200]
+    entity = str(data.get("entity", ""))[:200]
+    mr = data.get("module_results", {}) or {}
+    comp = data.get("competitive_intelligence", {}) or {}
+    serp_results = comp.get("raw_serp_results", []) or (mr.get("M01", {}) or {}).get("serp_results", [])
+    try:
+        brief = generate_brief(seed, entity, serp_results,
+                               comp.get("content_headings", {}),
+                               comp.get("content_gaps", {}),
+                               comp.get("competitor_entities", {}),
+                               comp.get("serp_features", {}),
+                               int(data.get("word_target", 0) or 0))
+        return jsonify(brief)
+    except Exception as e:
+        return _safe_error("Brief generation failed", e, 500)
+
+@app.route('/api/gsc_quick_wins', methods=['POST', 'OPTIONS'])
+def api_gsc_quick_wins():
+    """CSV-upload fallback for GSC Performance data -> striking distance/decay/cannibalization."""
+    if request.method == 'OPTIONS':
+        return jsonify({'ok': True})
+    ok_rl, msg_rl = check_rate_limit(_client_ip(), "gsc", 30, 3600)
+    if not ok_rl:
+        return jsonify({"error": msg_rl}), 429
+    try:
+        csv_text = ""
+        if "file" in request.files:
+            csv_text = request.files["file"].read(5_000_000).decode("utf-8", errors="ignore")
+        else:
+            data = request.get_json(silent=True) or {}
+            csv_text = str(data.get("csv", ""))[:5_000_000]
+        if not csv_text.strip():
+            return jsonify({"error": "Upload a GSC Performance CSV (query,page,clicks,impressions,ctr,position)"}), 400
+        rows = parse_gsc_csv(csv_text)
+        if not rows:
+            return jsonify({"error": "No parseable rows. Expected header: query,page,clicks,impressions,ctr,position"}), 400
+        return jsonify(quick_wins(rows))
+    except Exception as e:
+        return _safe_error("GSC analysis failed", e, 500)
+
+@app.route('/api/share', methods=['POST', 'OPTIONS'])
+def api_share():
+    """Versioned share-link store (replaces OTP-email delivery for enterprise sharing)."""
+    if request.method == 'OPTIONS':
+        return jsonify({'ok': True})
+    data = request.get_json(silent=True) or {}
+    report = data.get("report") or {}
+    if not isinstance(report, dict) or not report:
+        return jsonify({"error": "report payload required"}), 400
+    sid = secrets.token_urlsafe(12)
+    with _REPORT_LOCK:
+        _REPORT_STORE[sid] = {"report": report, "created": time.time(),
+                              "label": str(data.get("label", ""))[:120]}
+        if len(_REPORT_STORE) > 200:
+            oldest = sorted(_REPORT_STORE.items(), key=lambda kv: kv[1]["created"])[:50]
+            for k, _ in oldest:
+                _REPORT_STORE.pop(k, None)
+    return jsonify({"ok": True, "share_id": sid, "share_url": f"/api/share/{sid}"})
+
+@app.route('/api/share/<sid>', methods=['GET'])
+def api_share_get(sid):
+    rec = _REPORT_STORE.get(str(sid)[:32])
+    if not rec:
+        return jsonify({"error": "Unknown or expired share link"}), 404
+    return jsonify({"ok": True, "label": rec.get("label", ""), "report": rec.get("report")})
+
+@app.route('/api/health', methods=['GET'])
+def api_health():
+    import intent_entity_platform as _pkg
+    return jsonify({"ok": True, "version": APP_VERSION, "debug": APP_DEBUG,
+                    "serp_provider": os.environ.get("SERP_PROVIDER", "ddg_fallback"),
+                    "time": datetime.datetime.now().isoformat()})
 
 INDEX_HTML=r"""<!DOCTYPE html>
 <html lang="en">
@@ -743,6 +1326,46 @@ ul.where li{font-size:.88rem;color:var(--txt2);line-height:1.7;margin-bottom:6px
 .sub{border:1px solid var(--bd);border-radius:8px;overflow:hidden}
 .subh{background:var(--s3);padding:9px 13px;font-size:.8rem;font-weight:700;color:var(--acc2);text-transform:uppercase;letter-spacing:.4px}
 .subb{padding:13px}
+.card .toggle-h{display:flex;justify-content:space-between;align-items:center;cursor:pointer;user-select:none}
+.card .toggle-h .caret{transition:transform .2s;font-size:.8rem;color:var(--txt3)}
+.card.closed .toggle-h .caret{transform:rotate(-90deg)}
+.card .toggle-body{transition:max-height .3s ease,opacity .3s ease;overflow:hidden}
+.card.closed .toggle-body{max-height:0!important;opacity:0;padding-top:0;padding-bottom:0}
+.clickable-block{cursor:pointer;transition:border-color .2s}
+.clickable-block:hover{border-color:var(--pri)!important}
+.clickable-block .cb-hint{display:none;font-size:.72rem;color:var(--txt3);font-style:italic}
+.clickable-block:hover .cb-hint{display:inline}
+.mod-head{display:flex;align-items:center;gap:8px;cursor:pointer;user-select:none;padding:14px 16px;border-radius:14px 14px 0 0;margin:-22px -22px 14px;background:linear-gradient(135deg,rgba(124,92,252,.14),rgba(34,211,238,.08));border-bottom:1px solid var(--bd);transition:background .2s}
+.mod-head:hover{background:linear-gradient(135deg,rgba(124,92,252,.24),rgba(34,211,238,.12))}
+.mod-head .mnum{font-size:.72rem;font-weight:800;color:var(--pri);letter-spacing:1px}
+.mod-head .mname{font-weight:700;color:var(--txt)}
+.mod-head .mcaret{margin-left:auto;font-size:.8rem;color:var(--txt3);transition:transform .2s}
+.mod-card.closed .mod-head .mcaret{transform:rotate(-90deg)}
+.mod-card .mod-body{transition:max-height .35s ease,opacity .3s ease;overflow:hidden}
+.mod-card.closed .mod-body{max-height:0!important;opacity:0;padding:0}
+.detail-modal{position:fixed;inset:0;background:rgba(2,6,23,.72);z-index:2000;display:flex;align-items:center;justify-content:center;padding:30px;animation:fadeIn .2s ease}
+.detail-modal .dm-box{background:var(--s1);border:1px solid var(--bd2);border-radius:14px;max-width:860px;width:100%;max-height:86vh;overflow:auto;box-shadow:0 20px 60px rgba(0,0,0,.5);padding:22px}
+.detail-modal .dm-close{float:right;background:var(--s3);border:1px solid var(--bd2);color:var(--txt);border-radius:8px;padding:6px 14px;cursor:pointer;font-weight:700}
+.detail-modal .dm-title{font-size:1.1rem;font-weight:700;color:var(--acc2);margin-bottom:12px;padding-right:40px}
+.kv-click{cursor:pointer;position:relative}
+.kv-click:hover{background:var(--s3)!important}
+.tbl-click td{cursor:pointer}
+.tbl-click tr:hover td{background:var(--s3)!important}
+.dm-click{cursor:pointer}
+.dm-click:hover{outline:1px dashed var(--pri);outline-offset:1px;border-radius:3px}
+tr.dm-click:hover td{background:var(--s3)!important}
+.sub.dm-click:hover{border-color:var(--pri)}
+.chip.dm-click:hover{border-color:var(--pri);background:var(--s2)}
+.section-click{cursor:pointer}
+.section-click:hover{color:var(--pri)!important}
+.section-click .cb-hint{display:none;font-size:.7rem;color:var(--txt3);font-weight:400;font-style:italic}
+.section-click:hover .cb-hint{display:inline}
+.bench-excellent{color:var(--grn);font-weight:700}
+.bench-good{color:var(--acc2);font-weight:700}
+.bench-needs{color:var(--yel);font-weight:700}
+.bench-fail{color:var(--red);font-weight:700}
+.bench-target{font-size:.72rem;color:var(--txt3)}
+.pop{position:absolute;background:var(--s3);border:1px solid var(--bd2);border-radius:8px;padding:10px 12px;font-size:.78rem;color:var(--txt2);box-shadow:0 8px 24px rgba(0,0,0,.4);z-index:3000;max-width:320px;pointer-events:none;white-space:pre-wrap;word-break:break-word}
 </style>
 </head>
 <body>
@@ -801,34 +1424,39 @@ ul.where li{font-size:.88rem;color:var(--txt2);line-height:1.7;margin-bottom:6px
 <div class="main" id="mainArea">
 <div class="info-page" id="infoArea">
 <h2>Welcome to the Intent, Entity & Semantic Intelligence Platform</h2>
-<p>A comprehensive 21-module analysis engine that evaluates your content for both traditional search engines and generative AI engines (Gemini, ChatGPT, Perplexity). Get maximum-depth blueprints for editorial, technical, GEO, CDN, and sentinel optimization.</p>
+<p>A comprehensive 21-module analysis engine that evaluates your content for both traditional search engines and generative AI engines (Gemini, ChatGPT, Perplexity). Every module runs on <strong>real, live, verified data</strong> - live SERP results, Wikidata entities, Wayback Machine archives, live competitor page analysis, HTTP/header inspection, structured-data validation, and verified statistics pulled from the web. Every finding is tied to an actual source. No fabricated numbers.</p>
 <h3>Why This Tool Exists</h3>
-<p>Modern SEO requires optimizing for two audiences: traditional search engines (Google, Bing) and generative AI engines (ChatGPT, Gemini, Perplexity). Most tools only address one. This platform analyzes your content across 21 specialized dimensions to ensure maximum visibility in both ecosystems.</p>
+<p>Modern SEO requires optimizing for two audiences: traditional search engines (Google, Bing) and generative AI engines (ChatGPT, Gemini, Perplexity). Most tools only address one. This platform analyzes your content across 21 specialized dimensions to ensure maximum visibility in both ecosystems - and tells you exactly what score to hit to win rankings, AI Overview extraction, and AI citations.</p>
 <h3>What This Tool Does</h3>
-<p>This platform runs 21 specialized analysis modules covering SERP analysis, GEO/AEO simulation, semantic structuring, E-E-A-T profiling, content decay detection, CDN edge preview, and more. Each module produces detailed, actionable output organized into 5 blueprint categories plus raw data.</p>
+<p>Runs 21 specialized analysis modules covering SERP analysis, GEO/AEO simulation, semantic structuring, E-E-A-T profiling, content decay detection, CDN edge preview, and more. Each module outputs three layers:</p>
+<ol class="steps">
+<li><strong>Full Analysis</strong> - every score, finding, live statistic, and competitor benchmark, color-coded (green/amber/red) against its target.</li>
+<li><strong>Score Benchmarks</strong> - the exact target/good/excellent thresholds for each score, with what each level means for rankings, AI Overviews, and AI citations.</li>
+<li><strong>Recommendations & Action Plan</strong> - what to do, when to do it, which tools to use, and a ready-made A/B test plan to prove the change works.</li>
+</ol>
 <h3>Modules Overview</h3>
 <div class="feature-grid">
-<div class="feature-card"><h4>M01: SERP & Knowledge Graph</h4><p>Analyze SERP features, entity graphs, and Knowledge Panel opportunities.</p></div>
-<div class="feature-card"><h4>M02: GEO & AEO Simulator</h4><p>Simulate Generative Engine and Answer Engine optimization strategies.</p></div>
-<div class="feature-card"><h4>M03: Semantic Structure</h4><p>Validate schema markup, heading hierarchy, and semantic HTML structure.</p></div>
-<div class="feature-card"><h4>M04: E-E-A-T Gap Profiler</h4><p>Profile Experience, Expertise, Authoritativeness, and Trustworthiness gaps.</p></div>
-<div class="feature-card"><h4>M05: Internal Link & Cannibalization</h4><p>Detect keyword cannibalization and optimize internal link architecture.</p></div>
-<div class="feature-card"><h4>M06: Fluff & Cliche Decoder</h4><p>Identify filler content, cliches, and non-original phrases.</p></div>
-<div class="feature-card"><h4>M07: Citation & Source Verifier</h4><p>Verify citation accuracy and source credibility for E-E-A-T signals.</p></div>
-<div class="feature-card"><h4>M08: Multimodal Asset Blueprint</h4><p>Plan images, videos, infographics, and interactive assets.</p></div>
-<div class="feature-card"><h4>M09: GEO Tracker</h4><p>Track Generative Engine Optimization performance across AI platforms.</p></div>
-<div class="feature-card"><h4>M10: CSR Simulator</h4><p>Simulate Client-Side Rendering impact on search engine indexing.</p></div>
-<div class="feature-card"><h4>M11: RAG Tester</h4><p>Test content for Retrieval-Augmented Generation compatibility.</p></div>
-<div class="feature-card"><h4>M12: Brand Compliance Engine</h4><p>Enforce brand voice, terminology, and style guidelines.</p></div>
-<div class="feature-card"><h4>M13: Schema Payload Generator</h4><p>Generate complete JSON-LD schema payloads for rich results.</p></div>
-<div class="feature-card"><h4>M14: Intent & Bounce Predictor</h4><p>Predict bounce risk and align content with user intent signals.</p></div>
-<div class="feature-card"><h4>M15: Content Decay Engine</h4><p>Detect content freshness decay and generate refresh briefs.</p></div>
-<div class="feature-card"><h4>M16: CDN Edge Previewer</h4><p>Preview edge-injected schema, headers, and pre-rendered HTML.</p></div>
-<div class="feature-card"><h4>M17: A/B Testing Engine</h4><p>Design statistical A/B tests for content experiments.</p></div>
-<div class="feature-card"><h4>M18: Indexing Sentinel</h4><p>Monitor indexing status and crawl budget health.</p></div>
-<div class="feature-card"><h4>M19: Localization Sync</h4><p>Manage hreflang, localized schema, and entity mapping.</p></div>
-<div class="feature-card"><h4>M20: Digital PR Engine</h4><p>Plan PR outreach, authority signals, and brand mentions.</p></div>
-<div class="feature-card"><h4>M21: DOM Inspector</h4><p>Analyze DOM structure, layout shifts, and performance impact.</p></div>
+<div class="feature-card" onclick="showModuleInfo('M01')"><h4>M01: SERP & Knowledge Graph</h4><p>Analyze SERP features, entity graphs, and Knowledge Panel opportunities. <b style="color:var(--acc2)">Click for details &rarr;</b></p></div>
+<div class="feature-card" onclick="showModuleInfo('M02')"><h4>M02: GEO & AEO Simulator</h4><p>Simulate Generative Engine and Answer Engine optimization strategies. <b style="color:var(--acc2)">Click for details &rarr;</b></p></div>
+<div class="feature-card" onclick="showModuleInfo('M03')"><h4>M03: Semantic Structure</h4><p>Validate schema markup, heading hierarchy, and semantic HTML structure. <b style="color:var(--acc2)">Click for details &rarr;</b></p></div>
+<div class="feature-card" onclick="showModuleInfo('M04')"><h4>M04: E-E-A-T Gap Profiler</h4><p>Profile Experience, Expertise, Authoritativeness, and Trustworthiness gaps. <b style="color:var(--acc2)">Click for details &rarr;</b></p></div>
+<div class="feature-card" onclick="showModuleInfo('M05')"><h4>M05: Internal Link & Cannibalization</h4><p>Detect keyword cannibalization and optimize internal link architecture. <b style="color:var(--acc2)">Click for details &rarr;</b></p></div>
+<div class="feature-card" onclick="showModuleInfo('M06')"><h4>M06: Fluff & Cliche Decoder</h4><p>Identify filler content, cliches, and non-original phrases. <b style="color:var(--acc2)">Click for details &rarr;</b></p></div>
+<div class="feature-card" onclick="showModuleInfo('M07')"><h4>M07: Citation & Source Verifier</h4><p>Verify citation accuracy and source credibility for E-E-A-T signals. <b style="color:var(--acc2)">Click for details &rarr;</b></p></div>
+<div class="feature-card" onclick="showModuleInfo('M08')"><h4>M08: Multimodal Asset Blueprint</h4><p>Plan images, videos, infographics, and interactive assets. <b style="color:var(--acc2)">Click for details &rarr;</b></p></div>
+<div class="feature-card" onclick="showModuleInfo('M09')"><h4>M09: GEO Tracker</h4><p>Track Generative Engine Optimization performance across AI platforms. <b style="color:var(--acc2)">Click for details &rarr;</b></p></div>
+<div class="feature-card" onclick="showModuleInfo('M10')"><h4>M10: CSR Simulator</h4><p>Simulate Client-Side Rendering impact on search engine indexing. <b style="color:var(--acc2)">Click for details &rarr;</b></p></div>
+<div class="feature-card" onclick="showModuleInfo('M11')"><h4>M11: RAG Tester</h4><p>Test content for Retrieval-Augmented Generation compatibility. <b style="color:var(--acc2)">Click for details &rarr;</b></p></div>
+<div class="feature-card" onclick="showModuleInfo('M12')"><h4>M12: Brand Compliance Engine</h4><p>Enforce brand voice, terminology, and style guidelines. <b style="color:var(--acc2)">Click for details &rarr;</b></p></div>
+<div class="feature-card" onclick="showModuleInfo('M13')"><h4>M13: Schema Payload Generator</h4><p>Generate complete JSON-LD schema payloads for rich results. <b style="color:var(--acc2)">Click for details &rarr;</b></p></div>
+<div class="feature-card" onclick="showModuleInfo('M14')"><h4>M14: Intent & Bounce Predictor</h4><p>Predict bounce risk and align content with user intent signals. <b style="color:var(--acc2)">Click for details &rarr;</b></p></div>
+<div class="feature-card" onclick="showModuleInfo('M15')"><h4>M15: Content Decay Engine</h4><p>Detect content freshness decay and generate refresh briefs. <b style="color:var(--acc2)">Click for details &rarr;</b></p></div>
+<div class="feature-card" onclick="showModuleInfo('M16')"><h4>M16: CDN Edge Previewer</h4><p>Preview edge-injected schema, headers, and pre-rendered HTML. <b style="color:var(--acc2)">Click for details &rarr;</b></p></div>
+<div class="feature-card" onclick="showModuleInfo('M17')"><h4>M17: A/B Testing Engine</h4><p>Design statistical A/B tests for content experiments. <b style="color:var(--acc2)">Click for details &rarr;</b></p></div>
+<div class="feature-card" onclick="showModuleInfo('M18')"><h4>M18: Indexing Sentinel</h4><p>Monitor indexing status and crawl budget health. <b style="color:var(--acc2)">Click for details &rarr;</b></p></div>
+<div class="feature-card" onclick="showModuleInfo('M19')"><h4>M19: Localization Sync</h4><p>Manage hreflang, localized schema, and entity mapping. <b style="color:var(--acc2)">Click for details &rarr;</b></p></div>
+<div class="feature-card" onclick="showModuleInfo('M20')"><h4>M20: Digital PR Engine</h4><p>Plan PR outreach, authority signals, and brand mentions. <b style="color:var(--acc2)">Click for details &rarr;</b></p></div>
+<div class="feature-card" onclick="showModuleInfo('M21')"><h4>M21: DOM Inspector</h4><p>Analyze DOM structure, layout shifts, and performance impact. <b style="color:var(--acc2)">Click for details &rarr;</b></p></div>
 </div>
 <h3>What You Need</h3>
 <ul>
@@ -836,6 +1464,7 @@ ul.where li{font-size:.88rem;color:var(--txt2);line-height:1.7;margin-bottom:6px
 <li><strong>Primary Entity</strong> - The main entity/topic your content covers</li>
 <li><strong>Brand Name</strong> - Your brand for compliance and authority checks</li>
 <li><strong>Audience Profile</strong> - Funnel stage, knowledge level, and voice preference</li>
+<li><strong>Page URL (optional)</strong> - Paste a URL for real DOM, schema, header, link, and page-content analysis (recommended for maximum depth)</li>
 </ul>
 <h3>What You Get</h3>
 <ul>
@@ -845,10 +1474,13 @@ ul.where li{font-size:.88rem;color:var(--txt2);line-height:1.7;margin-bottom:6px
 <li><strong>Technical Payload</strong> - JSON-LD schemas, validation, internal linking, DOM analysis</li>
 <li><strong>CDN Deployment</strong> - Edge workers, headers, pre-render simulation</li>
 <li><strong>Sentinel Brief</strong> - Monitoring config, alerts, A/B test design, rollback guards</li>
-<li><strong>21 Module Results</strong> - Deep analysis from each specialized module</li>
+<li><strong>21 Module Results</strong> - Analysis first, then color-coded score benchmarks with targets, then a full action plan (what / when / tools / A/B test) for every module</li>
+<li><strong>Live Verified Statistics</strong> - Real, sourced statistics extracted from live search, attached to every module</li>
+<li><strong>Competitive Benchmarking</strong> - Your content measured against real, live competitors from actual SERP results</li>
+<li><strong>Professional PDF Report</strong> - A polished, aligned report with cover page, table of contents, and all 21 modules</li>
 <li><strong>Raw JSON</strong> - Complete data export for programmatic use</li>
 </ul>
-<p style="margin-top:24px;color:var(--pri2);font-weight:600;font-size:.95rem">Enter your seed keyword and entity in the sidebar, then click <strong>Run 21-Module Analysis</strong> to begin.</p>
+<p style="margin-top:24px;color:var(--pri2);font-weight:600;font-size:.95rem">Enter your seed keyword and entity in the sidebar, then click <strong>Run 21-Module Analysis</strong> to begin. Every result is generated from real-time research - click any number, row, or value for the full underlying detail.</p>
 </div>
 </div>
 </div>
@@ -862,6 +1494,14 @@ for(let i=1;i<=21;i++){const k="m"+(i<10?"0":"")+i;TAB_LABELS[k]=MN[k.toUpperCas
 function toggleTheme(){document.body.classList.toggle('light');localStorage.setItem('theme',document.body.classList.contains('light')?'light':'dark');}
 (function(){const t=localStorage.getItem('theme');if(t==='light')document.body.classList.add('light');})();
 
+function fetchWithTimeout(url,options={},timeoutMs=120000){
+return new Promise((resolve,reject)=>{
+const controller=new AbortController();
+const timer=setTimeout(()=>controller.abort(),timeoutMs);
+fetch(url,{...options,signal:controller.signal}).then(res=>{clearTimeout(timer);resolve(res);}).catch(err=>{clearTimeout(timer);if(err.name==='AbortError'){reject(new Error('Request timed out after '+(timeoutMs/1000)+' seconds. The analysis is taking longer than expected.'));}else{reject(err);}});
+});
+}
+
 async function runUrlAnalysis(){
 const url=document.getElementById('iUrl').value.trim();
 const brand=document.getElementById('iUrlBrand').value.trim();
@@ -869,24 +1509,111 @@ if(!url){alert('Please enter a published blog or article URL.');return;}
 if(!url.startsWith('http')){alert('Please enter a valid URL starting with http:// or https://');return;}
 const btn=document.getElementById('urlBtn');
 btn.disabled=true;btn.textContent='Fetching & Analyzing...';
-document.getElementById('statusBox').innerHTML='<div class="progress"><div class="fill" id="pFill" style="width:0%"></div></div><p style="font-size:.82rem;color:var(--txt3);margin-top:4px">Fetching URL content and running 21-module analysis...</p><div class="mod-grid" id="modGrid"></div>';
-Object.entries(MN).forEach(([k,v])=>{document.getElementById('modGrid').innerHTML+=`<div class="mod-i" id="m_${k}"><div class="d w"></div><span>${k}</span></div>`;});
-let p=0;const iv=setInterval(()=>{if(p<90){p+=Math.random()*3;const f=document.getElementById('pFill');if(f)f.style.width=p+'%';}},200);
+const aid='url_'+Date.now()+'_'+Math.floor(Math.random()*1e6);
+showProgress('Fetching URL content & analyzing competitors...');
+buildModGrid();
+const poll=startProgressPolling(aid);
 try{
-const res=await fetch('/api/analyze-url',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({url:url,brand:brand,locale:'en-US',device:'desktop'})});
+const res=await fetchWithTimeout('/api/analyze-url',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({url:url,brand:brand,locale:'en-US',device:'desktop',analysis_id:aid})},300000);
+if(!res.ok){const errText=await res.text();stopProgressPolling(poll);document.getElementById('statusBox').innerHTML='<p style="color:var(--red);font-size:.82rem">Server error ('+res.status+'): '+esc(errText.slice(0,200))+'</p>';btn.disabled=false;btn.textContent='\u25B6 Analyze This URL';return;}
 const data=await res.json();
-clearInterval(iv);
-if(data.error){document.getElementById('statusBox').innerHTML='<p style="color:var(--red);font-size:.82rem">Error: '+JSON.stringify(data.error)+'</p>';btn.disabled=false;btn.textContent='\u25B6 Analyze This URL';return;}
-const f=document.getElementById('pFill');if(f)f.style.width='100%';
-Object.keys(MN).forEach(k=>{const el=document.getElementById('m_'+k);if(el){const d=el.querySelector('.d');d.className=data.module_results&&data.module_results[k]&&!data.module_results[k].error?'d ok':'d er';}});
+stopProgressPolling(poll);
+if(data.error){document.getElementById('statusBox').innerHTML='<p style="color:var(--red);font-size:.82rem">Error: '+esc(JSON.stringify(data.error).slice(0,500))+'</p>';btn.disabled=false;btn.textContent='\u25B6 Analyze This URL';return;}
+markModuleDots(data);
+showComplete(data);
 setTimeout(()=>renderAll(data),400);
-}catch(err){clearInterval(iv);document.getElementById('statusBox').innerHTML='<p style="color:var(--red)">'+err.message+'</p>';}
+}catch(err){stopProgressPolling(poll);document.getElementById('statusBox').innerHTML='<p style="color:var(--red);font-weight:600">'+err.message+'</p><p style="font-size:.82rem;color:var(--txt3);margin-top:8px">If this persists, try using the keyword-based analysis instead, or check the browser console (F12) for details.</p>';}
 btn.disabled=false;btn.textContent='\u25B6 Analyze This URL';
+}
+function showProgress(label){
+const el=document.getElementById('statusBox');
+el.innerHTML='<div class="progress"><div class="fill" id="pFill" style="width:0%"></div></div><p id="pText" style="font-size:.82rem;color:var(--txt3);margin-top:4px">'+esc(label)+'</p><div class="mod-grid" id="modGrid"></div>';
+}
+function buildModGrid(){
+const mg=document.getElementById('modGrid');
+if(!mg)return;
+mg.innerHTML='';
+Object.entries(MN).forEach(([k,v])=>{mg.innerHTML+=`<div class="mod-i" id="m_${k}" title="${esc(v)}"><div class="d w"></div><span>${k}</span></div>`;});
+}
+function startProgressPolling(analysisId){
+if(window._progTimer)clearInterval(window._progTimer);
+const timer=setInterval(async()=>{
+try{
+const r=await fetch('/api/progress/'+analysisId,{cache:'no-store'});
+if(!r.ok)return;
+const d=await r.json();
+if(!d.ok)return;
+const f=document.getElementById('pFill');if(f)f.style.width=(d.percent||0)+'%';
+const t=document.getElementById('pText');
+if(t){
+if(d.current_module&&d.current_module_name)t.textContent='Running '+d.current_module+' - '+d.current_module_name+'...';
+else if(d.phase_label)t.textContent=d.phase_label;
+}
+applyProgressDots(d);
+}catch(e){}
+},600);
+window._progTimer=timer;
+return timer;
+}
+function stopProgressPolling(timer){
+if(window._progTimer){clearInterval(window._progTimer);window._progTimer=null;}
+}
+function applyProgressDots(d){
+if(!d.module_status)return;
+Object.keys(MN).forEach(k=>{
+const st=d.module_status[k];
+const el=document.getElementById('m_'+k);
+if(!el)return;
+const dot=el.querySelector('.d');
+if(st==='completed')dot.className='d ok';
+else if(st==='error')dot.className='d er';
+else if(st==='running')dot.className='d r';
+});
+}
+function markModuleDots(data){
+Object.keys(MN).forEach(k=>{const el=document.getElementById('m_'+k);if(el){const d=el.querySelector('.d');d.className=data.module_results&&data.module_results[k]&&!data.module_results[k].error?'d ok':'d er';}});
+}
+function showComplete(data){
+const mods=data.module_results||{};const ok=Object.keys(MN).filter(k=>mods[k]&&!mods[k].error).length;const fail=Object.keys(MN).length-ok;
+const meta=data.analysis_metadata||{};
+const elapsed=(meta.started_at&&meta.completed_at)?Math.round((new Date(meta.completed_at)-new Date(meta.started_at))/1000)+'s':'';
+document.getElementById('topStatus').textContent='Analysis complete - '+ok+'/'+Object.keys(MN).length+' modules';
+const errList=Object.keys(mods).filter(k=>mods[k]&&mods[k].error);
+document.getElementById('statusBox').innerHTML='<div style="background:rgba(52,211,153,.12);border:1px solid rgba(52,211,153,.4);border-radius:10px;padding:12px;margin-bottom:10px"><p style="color:var(--grn);font-weight:700;font-size:.9rem">&#10003; Analysis Complete</p><p style="font-size:.8rem;color:var(--txt2);margin-top:4px">'+ok+'/'+Object.keys(MN).length+' modules completed'+(fail?' &middot; '+fail+' failed':'')+(elapsed?' &middot; took '+elapsed:'')+'</p></div>'+(errList.length?'<p style="font-size:.78rem;color:var(--red);margin-bottom:8px">Failed modules: '+errList.join(', ')+'</p>':'');
+const f=document.getElementById('pFill');if(f)f.style.width='100%';
 }
 
 function showToast(msg){const t=document.createElement('div');t.className='copy-toast';t.textContent=msg;document.body.appendChild(t);setTimeout(()=>t.remove(),2000);}
 function copyText(txt){navigator.clipboard.writeText(txt).then(()=>showToast('Copied to clipboard!'));}
 function esc(s){return s.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');}
+function showModuleInfo(mk){
+const desc={
+M01:"Analyzes the live SERP (DuckDuckGo), real SERP features (featured snippets, PAA, knowledge panels), and verifies Knowledge Graph entities against Wikidata (including Wikipedia sitelinks).",
+M02:"Simulates how generative engines (Gemini, ChatGPT, Perplexity) and answer engines would treat your content. Uses real competitor pages to benchmark GEO readiness, citation triggers, and RAG-friendliness.",
+M03:"Validates heading hierarchy, semantic HTML, schema markup and content flow. Compares your structure against real competitor headings from fetched pages.",
+M04:"Profiles E-E-A-T gaps using live competitor entities, content gaps from fetched competitor pages, SME placement and unique value proposition analysis.",
+M05:"Detects keyword cannibalization and builds internal link plans. Analyzes the actual link structure of the submitted URL (internal/external ratio, anchor text, real link health via HTTP verification).",
+M06:"Scores fluff, cliches and AI-style patterns in your text using real competitor readability and fluff comparison.",
+M07:"Verifies citations and sources in your content. Assesses hallucination risk and source credibility.",
+M08:"Plans multimodal assets (images, video, infographics) benchmarked against real competitor media usage counts from fetched pages.",
+M09:"Designs GEO/AEO tracking configuration, monitoring dashboards and alert systems, plus real related-query SERP landscape research.",
+M10:"Simulates client-side rendering impact on indexing and content availability using the actual fetched HTML.",
+M11:"Chunks your text and scores RAG-readiness, self-containedness and answer-extractability. Benchmarks against real competitor content depth.",
+M12:"Enforces brand voice, terminology, regulated words and blacklisted terms across your content.",
+M13:"Generates validated JSON-LD schemas (Article, FAQ, HowTo, Breadcrumb, Organization) from real entity and brand data with search-engine coverage analysis.",
+M14:"Predicts bounce risk and intent alignment. Uses real competitor heading patterns and readability to benchmark your content's depth.",
+M15:"Detects content decay using real Wayback Machine snapshots, HTTP status/headers and freshness scoring. Generates a refresh brief.",
+M16:"Generates CDN edge worker snippets, server-header inspection and pre-render simulation for edge deployment.",
+M17:"Designs statistical A/B tests for content experiments with sample-size, duration and rollback guardrails.",
+M18:"Monitors indexing status and crawl budget health using real robots.txt, headers, sitemap and SERP presence.",
+M19:"Builds hreflang configuration and localization sync using real related-query SERP research across locales.",
+M20:"Creates a digital PR plan with real outlet discovery from live search, verified Wikidata entities and real competitor backlink/entity themes.",
+M21:"Inspects the actual DOM from the fetched HTML: total elements, depth, layout-shift risk, script/style weight and rendering complexity."
+};
+openDetail(ev=null,null,mk,'key');
+const m=document.getElementById('detailModal');
+if(m){const t=m.querySelector('.dm-title');if(t)t.textContent=mk+': '+(MN[mk]||'');const box=m.querySelector('.dm-box');if(box){const p=document.createElement('p');p.style.cssText='margin:0 0 14px;padding:12px 14px;background:var(--s3);border-radius:8px;font-size:.9rem;color:var(--txt2);line-height:1.6';p.innerHTML=esc(desc[mk]||'');const title=m.querySelector('.dm-title');if(title)title.insertAdjacentElement('afterend',p);}}
+}
 
 function renderExportCard(){
 return `<div class="card" style="border-color:var(--pri);margin-bottom:16px">
@@ -913,7 +1640,7 @@ const data=window._lastResults;
 if(!data){showToast('Run an analysis first.');return;}
 btn.disabled=true;btn.textContent='Generating PDF...';
 try{
-const res=await fetch('/api/download_pdf',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({report:data})});
+const res=await fetchWithTimeout('/api/download_pdf',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({report:data})},60000);
 if(!res.ok){const e=await res.json().catch(()=>({}));showToast((e.error||'PDF generation failed').slice(0,80));return;}
 const blob=await res.blob();
 const a=document.createElement('a');a.href=URL.createObjectURL(blob);
@@ -931,7 +1658,7 @@ if(!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)){setMailMsg('Please enter a valid e
 const btn=document.getElementById('otpBtn');btn.disabled=true;btn.textContent='Sending OTP...';
 setMailMsg('Sending OTP to '+email+' ...',false);
 try{
-const res=await fetch('/api/send_otp',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({email})});
+const res=await fetchWithTimeout('/api/send_otp',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({email})},30000);
 const d=await res.json();
 if(d.error){setMailMsg(d.error,true);}
 else{setMailMsg('OTP sent to '+email+'. Check your inbox (and spam).',false);const r=document.getElementById('otpRow');if(r)r.classList.remove('hidden');}
@@ -945,7 +1672,7 @@ if(!otp||otp.length!==6){setMailMsg('Enter the 6-digit OTP.',true);return;}
 const btn=document.getElementById('verifyBtn');btn.disabled=true;btn.textContent='Sending Report...';
 setMailMsg('Verifying OTP and sending the PDF report...',false);
 try{
-const res=await fetch('/api/verify_and_send_report',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({email:email,otp:otp,report:window._lastResults})});
+const res=await fetchWithTimeout('/api/verify_and_send_report',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({email:email,otp:otp,report:window._lastResults})},60000);
 const d=await res.json();
 if(d.error){setMailMsg(d.error,true);}
 else{setMailMsg('Success! PDF report sent to '+email+'.',false);}
@@ -957,20 +1684,22 @@ document.getElementById('fForm').addEventListener('submit',async e=>{
 e.preventDefault();
 const btn=document.getElementById('runBtn');
 btn.disabled=true;btn.textContent='Running 21-Module Analysis...';
-document.getElementById('statusBox').innerHTML='<div class="progress"><div class="fill" id="pFill" style="width:0%"></div></div><p style="font-size:.82rem;color:var(--txt3);margin-top:4px">Initializing modules...</p><div class="mod-grid" id="modGrid"></div>';
-const mg=document.getElementById('modGrid');
-Object.entries(MN).forEach(([k,v])=>{mg.innerHTML+=`<div class="mod-i" id="m_${k}"><div class="d w"></div><span>${k}</span></div>`;});
-let p=0;const iv=setInterval(()=>{if(p<92){p+=Math.random()*4;const f=document.getElementById('pFill');if(f)f.style.width=p+'%';}},150);
+const aid='an_'+Date.now()+'_'+Math.floor(Math.random()*1e6);
+showProgress('Fetching live SERP data & analyzing competitors...');
+buildModGrid();
+const poll=startProgressPolling(aid);
 try{
-const body={seed:document.getElementById('iSeed').value,entity:document.getElementById('iEntity').value,brand:document.getElementById('iBrand').value,website:document.getElementById('iWebsite').value,locale:document.getElementById('iLocale').value,device:document.getElementById('iDevice').value,funnel:document.getElementById('iFunnel').value,knowledge:document.getElementById('iKnow').value,voice:document.getElementById('iVoice').value,secondary:document.getElementById('iSec').value,blacklist:document.getElementById('iBlack').value,sme:document.getElementById('iSME').value};
-const res=await fetch('/api/analyze',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)});
+const body={seed:document.getElementById('iSeed').value,entity:document.getElementById('iEntity').value,brand:document.getElementById('iBrand').value,website:document.getElementById('iWebsite').value,locale:document.getElementById('iLocale').value,device:document.getElementById('iDevice').value,funnel:document.getElementById('iFunnel').value,knowledge:document.getElementById('iKnow').value,voice:document.getElementById('iVoice').value,secondary:document.getElementById('iSec').value,blacklist:document.getElementById('iBlack').value,sme:document.getElementById('iSME').value,analysis_id:aid};
+const res=await fetchWithTimeout('/api/analyze',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)},300000);
+if(!res.ok){const errText=await res.text();stopProgressPolling(poll);document.getElementById('statusBox').innerHTML='<p style="color:var(--red);font-size:.82rem">Server error ('+res.status+'): '+esc(errText.slice(0,200))+'</p>';btn.disabled=false;btn.textContent='Run 21-Module Analysis';return;}
 const data=await res.json();
-clearInterval(iv);
-if(data.error){document.getElementById('statusBox').innerHTML='<p style="color:var(--red);font-size:.82rem">Error: '+JSON.stringify(data.error)+'</p>';btn.disabled=false;btn.textContent='Run 21-Module Analysis';return;}
-const f=document.getElementById('pFill');if(f)f.style.width='100%';
-Object.keys(MN).forEach(k=>{const el=document.getElementById('m_'+k);if(el){const d=el.querySelector('.d');d.className=data.module_results&&data.module_results[k]&&!data.module_results[k].error?'d ok':'d er';}});
+stopProgressPolling(poll);
+window._lastResults=data;
+if(data.error){document.getElementById('statusBox').innerHTML='<p style="color:var(--red);font-size:.82rem">Error: '+esc(JSON.stringify(data.error).slice(0,500))+'</p>';btn.disabled=false;btn.textContent='Run 21-Module Analysis';return;}
+markModuleDots(data);
+showComplete(data);
 setTimeout(()=>renderAll(data),400);
-}catch(err){clearInterval(iv);document.getElementById('statusBox').innerHTML='<p style="color:var(--red)">'+err.message+'</p>';}
+}catch(err){stopProgressPolling(poll);document.getElementById('statusBox').innerHTML='<p style="color:var(--red);font-weight:600">'+err.message+'</p><p style="font-size:.82rem;color:var(--txt3);margin-top:8px">If this persists, check the browser console (F12) for details, or try refreshing the page.</p>';}
 btn.disabled=false;btn.textContent='Run 21-Module Analysis';
 });
 
@@ -984,8 +1713,8 @@ if(ud){
 urlBanner=`<div class="card" style="border-color:var(--acc);margin-bottom:16px">
 <h3>&#128279; URL Analysis Results</h3>
 <div class="sg">
-<div class="sb b"><div class="v" style="font-size:1rem;word-break:break-all">${ud.url||''}</div><div class="l">Analyzed URL</div></div>
-<div class="sb"><div class="v">${ud.title||'N/A'}</div><div class="l">Page Title</div></div>
+<div class="sb b"><div class="v" style="font-size:1rem;word-break:break-all">${esc(ud.url||'')}</div><div class="l">Analyzed URL</div></div>
+<div class="sb"><div class="v">${esc(ud.title||'N/A')}</div><div class="l">Page Title</div></div>
 <div class="sb p"><div class="v">${ud.word_count||0}</div><div class="l">Words</div></div>
 <div class="sb g"><div class="v">${ud.link_count||0}</div><div class="l">Links</div></div>
 <div class="sb"><div class="v">${ud.image_count||0}</div><div class="l">Images</div></div>
@@ -997,7 +1726,7 @@ ${ud.h2s&&ud.h2s.length?'<p style="font-size:.82rem;color:var(--txt3)"><strong>H
 </div>`;
 }
 let tabs='<div class="tabs">';
-TABS.forEach((t,i)=>{tabs+=`<button class="tab${i===0?' on':''}" onclick="showTab('${t}')">${TAB_LABELS[t]||t}</button>`;});
+TABS.forEach((t,i)=>{tabs+=`<button class="tab${i===0?' on':''}" onclick="showTab('${t}',this)">${TAB_LABELS[t]||t}</button>`;});
 tabs+='</div>';
 let panels='';
 panels+=`<div class="panel on" id="p_exec">${urlBanner}${renderExportCard()}${renderExec(b.executive_summary||{})}</div>`;
@@ -1020,37 +1749,68 @@ document.getElementById('rawBCode').innerHTML=hl(JSON.stringify(b,null,2));
 document.getElementById('rawMrCode').innerHTML=hl(JSON.stringify(mr,null,2));
 }
 
-function showTab(id){document.querySelectorAll('.tab').forEach(t=>t.classList.remove('on'));document.querySelectorAll('.panel').forEach(p=>p.classList.remove('on'));const btn=event.currentTarget||event.target.closest('.tab');if(btn)btn.classList.add('on');const p=document.getElementById('p_'+id);if(p)p.classList.add('on');}
+function showTab(id,el){document.querySelectorAll('.tab').forEach(t=>t.classList.remove('on'));document.querySelectorAll('.panel').forEach(p=>p.classList.remove('on'));const btn=el||(typeof event!=='undefined'&&event?(event.currentTarget||(event.target&&event.target.closest?event.target.closest('.tab'):null)):null);if(btn)btn.classList.add('on');const p=document.getElementById('p_'+id);if(p)p.classList.add('on');}
 
 function renderExec(s){
-let h=`<div class="card"><h3>&#127919; Executive Summary</h3>`;
+let h=`<div class="card"><h3 class="section-click" onclick="openDetailValue('Executive Summary',window._rawB.executive_summary||window._rawB&&{})" title="Click for full raw data">&#127919; Executive Summary <span class="cb-hint">(click for full detail)</span></h3>`;
 h+=`<div class="sg"><div class="sb b"><div class="v">${s.total_modules_executed||21}</div><div class="l">Modules</div></div><div class="sb r"><div class="v">${s.critical_issues_count||0}</div><div class="l">Critical</div></div><div class="sb y"><div class="v">${s.high_priority_count||0}</div><div class="l">High Priority</div></div><div class="sb p"><div class="v">${s.total_recommendations||0}</div><div class="l">Recommendations</div></div></div>`;
-if(s.critical_issues&&s.critical_issues.length){h+=`<h4>Critical Issues</h4><table><tr><th>Module</th><th>Action</th><th>Detail</th></tr>`;s.critical_issues.forEach(i=>{h+=`<tr class="issue"><td><span class="tag cr">CRITICAL</span> ${i.module||''}</td><td>${i.action||''}</td><td>${i.detail||''}</td></tr>`;});h+=`</table>`;}
-if(s.high_priority_actions&&s.high_priority_actions.length){h+=`<h4>High Priority Actions</h4><table><tr><th>Module</th><th>Action</th><th>Detail</th></tr>`;s.high_priority_actions.forEach(i=>{h+=`<tr class="issue"><td><span class="tag hi">HIGH</span> ${i.module||''}</td><td>${i.action||''}</td><td>${i.detail||''}</td></tr>`;});h+=`</table>`;}
+const cl=s.competitive_landscape||{};
+if(cl.competitors_analyzed){
+h+=`<div class="mblock cyan" style="margin-top:16px"><div class="mh">&#128202; Live Competitive Landscape</div>`;
+h+=`<div class="sg" style="grid-template-columns:repeat(auto-fit,minmax(140px,1fr))"><div class="sb b"><div class="v">${cl.competitors_analyzed}</div><div class="l">Competitors Analyzed</div></div><div class="sb"><div class="v">${cl.serp_results_reviewed||0}</div><div class="l">SERP Results</div></div><div class="sb g"><div class="v">${(cl.content_gaps_vs_competitors||[]).length}</div><div class="l">Content Gaps</div></div><div class="sb p"><div class="v">${(cl.competitor_entity_themes||[]).length}</div><div class="l">Entity Themes</div></div></div>`;
+const yvc=cl.your_content_vs_competitors||{};
+if(yvc.word_count_yours){
+h+=`<table><tr><th>Metric</th><th>Your Content</th><th>Competitor Avg</th><th>Delta</th><th>Position</th></tr>`;
+if(yvc.word_count_yours!==undefined)h+=`<tr><td><strong>Word Count</strong></td><td>${yvc.word_count_yours||'N/A'}</td><td>${yvc.word_count_competitor_average||0}</td><td>${yvc.word_count_delta_percent!==null&&yvc.word_count_delta_percent!==undefined?(yvc.word_count_delta_percent>0?'<span class="ok">+':'<span class="no">')+yvc.word_count_delta_percent+'%</span>':'N/A'}</td><td>${yvc.word_count_position||''}</td></tr>`;
+if(yvc.link_count_yours!==undefined)h+=`<tr><td><strong>Links</strong></td><td>${yvc.link_count_yours||'N/A'}</td><td>${yvc.link_count_competitor_average||0}</td><td colspan="2">&nbsp;</td></tr>`;
+if(yvc.image_count_yours!==undefined)h+=`<tr><td><strong>Images</strong></td><td>${yvc.image_count_yours||'N/A'}</td><td>${yvc.image_count_competitor_average||0}</td><td colspan="2">&nbsp;</td></tr>`;
+h+=`<tr><td><strong>Schema</strong></td><td>${yvc.schema_present_yours?'<span class="ok">Yes</span>':'<span class="no">No</span>'}</td><td>${yvc.schema_competitor_percentage||0}% adoption</td><td colspan="2">&nbsp;</td></tr>`;
+h+=`</table>`;
+}
+const ccb=cl.competitor_content_benchmarks||{};
+if(ccb.average_word_count){
+h+=`<h4>Competitor Content Benchmarks (real, from N=${cl.competitors_analyzed} live pages)</h4><table><tr><th>Benchmark</th><th>Avg</th><th>Median</th><th>Max</th><th>P75</th></tr>`;
+h+=`<tr><td>Word Count</td><td>${ccb.average_word_count||0}</td><td>${ccb.median_word_count||0}</td><td>${ccb.max_word_count||0}</td><td>${ccb.percentile_75_word_count||0}</td></tr>`;
+h+=`<tr><td>H2 Headings</td><td>${ccb.average_h2_count||0}</td><td colspan="3">&nbsp;</td></tr>`;
+h+=`<tr><td>H3 Headings</td><td>${ccb.average_h3_count||0}</td><td colspan="3">&nbsp;</td></tr>`;
+h+=`<tr><td>Images</td><td>${ccb.average_image_count||0}</td><td colspan="3">&nbsp;</td></tr>`;
+h+=`<tr><td>Internal Links</td><td>${ccb.average_internal_links||0}</td><td colspan="3">&nbsp;</td></tr>`;
+h+=`<tr><td>External Links</td><td>${ccb.average_external_links||0}</td><td colspan="3">&nbsp;</td></tr>`;
+h+=`<tr><td>Schema Adoption</td><td>${ccb.schema_adoption_percentage||0}%</td><td colspan="3">&nbsp;</td></tr>`;
+h+=`</table>`;
+}
+const gaps=cl.content_gaps_vs_competitors||[];
+if(gaps.length){h+=`<h4>Content Gaps vs Competitors (${gaps.length})</h4><div class="chips">${gaps.slice(0,15).map(g=>'<span class="chip">'+esc(String(g))+'</span>').join('')}</div>`;}
+const ent=cl.competitor_entity_themes||[];
+if(ent.length){h+=`<h4>Competitor Entity Themes</h4><div class="chips">${ent.slice(0,10).map(e=>'<span class="chip">'+esc(typeof e==='object'?JSON.stringify(e):String(e))+'</span>').join('')}</div>`;}
+h+=`</div>`;
+}
+if(s.critical_issues&&s.critical_issues.length){h+=`<h4>Critical Issues</h4><table><tr><th>Module</th><th>Action</th><th>Detail</th></tr>`;s.critical_issues.forEach(i=>{h+=`<tr class="issue"><td><span class="tag cr">CRITICAL</span> ${esc(i.module||'')}</td><td>${esc(i.action||'')}</td><td>${esc(i.detail||'')}</td></tr>`;});h+=`</table>`;}
+if(s.high_priority_actions&&s.high_priority_actions.length){h+=`<h4>High Priority Actions</h4><table><tr><th>Module</th><th>Action</th><th>Detail</th></tr>`;s.high_priority_actions.forEach(i=>{h+=`<tr class="issue"><td><span class="tag hi">HIGH</span> ${esc(i.module||'')}</td><td>${esc(i.action||'')}</td><td>${esc(i.detail||'')}</td></tr>`;});h+=`</table>`;}
 h+=`</div>`;return h;}
 
 function renderEdit(e){
-let h=`<div class="card"><h3>&#128221; Editorial & Writing Blueprint</h3>`;
+let h=`<div class="card"><h3 class="section-click" onclick="openDetailValue('Editorial Blueprint',window._rawB.output_1_editorial_blueprint||{})" title="Click for full raw data">&#128221; Editorial &amp; Writing Blueprint <span class="cb-hint">(click for full detail)</span></h3>`;
 const o=e.structural_outline||{};
 h+=`<div class="sg"><div class="sb b"><div class="v">${o.total_estimated_words||'N/A'}</div><div class="l">Est. Words</div></div><div class="sb"><div class="v">${o.total_sections||0}</div><div class="l">H2 Sections</div></div><div class="sb p"><div class="v">${(e.direct_answer_blocks||[]).length}</div><div class="l">Answer Blocks</div></div><div class="sb g"><div class="v">${(e.smee_placement_markers||[]).length}</div><div class="l">SME Placements</div></div></div>`;
-if(o.h1){h+=`<h4>H1 Title</h4><p style="font-size:.95rem;margin-bottom:12px"><strong>${o.h1.title||''}</strong></p><p style="margin-bottom:14px">${o.h1.purpose||''} | Target: ${o.h1.word_count_target||''}</p>`;}
-if(o.h2_sections){h+=`<h4>Content Outline (${o.h2_sections.length} Sections)</h4><table><tr><th>#</th><th>Heading</th><th>Content Type</th><th>Word Target</th><th>Schema</th><th>Direct Answer</th></tr>`;o.h2_sections.forEach((s,i)=>{h+=`<tr><td>${i+1}</td><td><strong>${s.title||''}</strong></td><td>${s.content_type||''}</td><td>${s.word_count_target||''}</td><td>${s.schema_type||'none'}</td><td>${s.direct_answer_required?'&#10003;':'-'}</td></tr>`;if(s.h3_subsections){s.h3_subsections.forEach(j=>{h+=`<tr><td></td><td style="padding-left:20px;color:var(--txt3)">${j.title||''}</td><td>${j.content_type||''}</td><td>${j.word_count_target||''}</td><td></td><td></td></tr>`;});}});h+=`</table>`;}
+if(o.h1){h+=`<h4>H1 Title</h4><p style="font-size:.95rem;margin-bottom:12px"><strong>${esc(o.h1.title||'')}</strong></p><p style="margin-bottom:14px">${esc(o.h1.purpose||'')} | Target: ${o.h1.word_count_target||''}</p>`;}
+if(o.h2_sections){h+=`<h4>Content Outline (${o.h2_sections.length} Sections)</h4><table><tr><th>#</th><th>Heading</th><th>Content Type</th><th>Word Target</th><th>Schema</th><th>Direct Answer</th></tr>`;o.h2_sections.forEach((s,i)=>{h+=`<tr><td>${i+1}</td><td><strong>${esc(s.title||'')}</strong></td><td>${esc(s.content_type||'')}</td><td>${s.word_count_target||''}</td><td>${s.schema_type||'none'}</td><td>${s.direct_answer_required?'&#10003;':'-'}</td></tr>`;if(s.h3_subsections){s.h3_subsections.forEach(j=>{h+=`<tr><td></td><td style="padding-left:20px;color:var(--txt3)">${esc(j.title||'')}</td><td>${esc(j.content_type||'')}</td><td>${j.word_count_target||''}</td><td></td><td></td></tr>`;});}});h+=`</table>`;}
 const dab=e.direct_answer_blocks||[];
-if(dab.length){h+=`<h4>Direct Answer Blocks (${dab.length})</h4><table><tr><th>ID</th><th>Heading Context</th><th>Word Count</th><th>Format</th><th>Citation Prob</th></tr>`;dab.forEach(d=>{h+=`<tr><td>${d.block_id||''}</td><td>${d.heading_context||''}</td><td>${d.target_word_count||''}</td><td>${d.extraction_format||''}</td><td>${d.citation_probability||''}</td></tr>`;});h+=`</table>`;}
+if(dab.length){h+=`<h4>Direct Answer Blocks (${dab.length})</h4><table><tr><th>ID</th><th>Heading Context</th><th>Word Count</th><th>Format</th><th>Citation Prob</th></tr>`;dab.forEach(d=>{h+=`<tr><td>${d.block_id||''}</td><td>${esc(d.heading_context||'')}</td><td>${d.target_word_count||''}</td><td>${esc(d.extraction_format||'')}</td><td>${d.citation_probability||''}</td></tr>`;});h+=`</table>`;}
 const sm=e.smee_placement_markers||[];
-if(sm.length){h+=`<h4>SME Quote Placements (${sm.length})</h4><table><tr><th>Expert</th><th>Title</th><th>Target Section</th><th>Priority</th><th>E-E-A-T Impact</th></tr>`;sm.forEach(s=>{h+=`<tr><td>${s.sme_name||''}</td><td>${s.sme_title||''}</td><td>${s.target_section||''}</td><td><span class="tag ${s.priority==='CRITICAL'?'cr':s.priority==='HIGH'?'hi':'md'}">${s.priority||''}</span></td><td>${s.eEat_enhancement||''}</td></tr>`;});h+=`</table>`;}
+if(sm.length){h+=`<h4>SME Quote Placements (${sm.length})</h4><table><tr><th>Expert</th><th>Title</th><th>Target Section</th><th>Priority</th><th>E-E-A-T Impact</th></tr>`;sm.forEach(s=>{h+=`<tr><td>${esc(s.sme_name||'')}</td><td>${esc(s.sme_title||'')}</td><td>${esc(s.target_section||'')}</td><td><span class="tag ${s.priority==='CRITICAL'?'cr':s.priority==='HIGH'?'hi':'md'}">${s.priority||''}</span></td><td>${s.eEat_enhancement||''}</td></tr>`;});h+=`</table>`;}
 const ig=e.information_gain_checklist||[];
 if(ig.length){h+=`<h4>Information Gain Checklist (${ig.length} Gaps)</h4><table><tr><th>Gap</th><th>Description</th><th>Opportunity</th><th>Action</th></tr>`;ig.forEach(g=>{h+=`<tr><td><span class="tag ${g.opportunity_level==='HIGH'?'cr':'hi'}">${g.opportunity_level||''}</span> ${g.category||''}</td><td>${g.description||''}</td><td>Competitor mentions: ${g.competitor_mention_count||0}</td><td>${g.recommended_action||''}</td></tr>`;});h+=`</table>`;}
 const uv=e.unique_value_propositions||[];
 if(uv.length){h+=`<h4>Unique Value Propositions (${uv.length})</h4><table><tr><th>UVP Type</th><th>Description</th><th>Differentiation Score</th><th>Recommendation</th></tr>`;uv.forEach(u=>{h+=`<tr><td>${u.uvp_type||''}</td><td>${u.description||''}</td><td>${u.differentiation_score||''}</td><td>${u.recommendation||''}</td></tr>`;});h+=`</table>`;}
 const q=e.quality_targets||{};
-if(Object.keys(q).length){h+=`<h4>Quality Targets</h4><table>`;Object.entries(q).forEach(([k,v])=>{h+=`<tr><td><strong>${k.replace(/_/g,' ')}</strong></td><td>${v}</td></tr>`;});h+=`</table>`;}
+if(Object.keys(q).length){h+=`<h4>Quality Targets</h4><table>`;Object.entries(q).forEach(([k,v])=>{h+=`<tr><td><strong>${esc(k.replace(/_/g,' '))}</strong></td><td>${esc(String(v))}</td></tr>`;});h+=`</table>`;}
 const fl=e.content_flow||{};
 if(Object.keys(fl).length){h+=`<h4>Content Flow Strategy</h4><table>`;Object.entries(fl).forEach(([k,v])=>{h+=`<tr><td><strong>${k.replace(/_/g,' ')}</strong></td><td>${Array.isArray(v)?v.join(', '):v}</td></tr>`;});h+=`</table>`;}
 h+=`</div>`;return h;}
 
 function renderGeo(g){
-let h=`<div class="card"><h3>&#127760; GEO & AEO Optimization</h3>`;
+let h=`<div class="card"><h3 class="section-click" onclick="openDetailValue('GEO & AEO Optimization',window._rawB.output_2_geo_optimization||{})" title="Click for full raw data">&#127760; GEO &amp; AEO Optimization <span class="cb-hint">(click for full detail)</span></h3>`;
 h+=`<div class="sg"><div class="sb ${(g.geo_readiness_score||0)>.6?'g':(g.geo_readiness_score||0)>.3?'y':'r'}"><div class="v">${(g.geo_readiness_score||0).toFixed(2)}</div><div class="l">GEO Readiness</div></div><div class="sb ${(g.rag_optimized_chunks||{}).rag_readiness_score>.6?'g':'y'}"><div class="v">${((g.rag_optimized_chunks||{}).rag_readiness_score||0).toFixed(3)}</div><div class="l">RAG Score</div></div><div class="sb b"><div class="v">${(g.rag_optimized_chunks||{}).total_chunks||0}</div><div class="l">RAG Chunks</div></div><div class="sb p"><div class="v">${(g.citation_triggers||[]).length}</div><div class="l">Citation Triggers</div></div></div>`;
 const abs=g.answer_block_strategy||{};
 if(Object.keys(abs).length){h+=`<h4>Answer Block Strategy</h4>`;Object.entries(abs).forEach(([type,cfg])=>{h+=`<h4 style="font-size:.84rem;margin-top:8px">${type.replace(/_/g,' ').toUpperCase()}</h4><table>`;if(typeof cfg==='object'&&!Array.isArray(cfg)){Object.entries(cfg).forEach(([k,v])=>{h+=`<tr><td><strong>${k.replace(/_/g,' ')}</strong></td><td>${typeof v==='object'?JSON.stringify(v):v}</td></tr>`;});}h+=`</table>`;});}
@@ -1061,16 +1821,16 @@ if(ct.length){h+=`<h4>Citation Triggers (${ct.length})</h4><table><tr><th>Type</
 const cs=g.citation_source_targets||[];
 if(cs.length){h+=`<h4>Required Citation Sources (${cs.length})</h4><table><tr><th>Type</th><th>Description</th><th>Priority</th></tr>`;cs.forEach(c=>{h+=`<tr><td>${c.type||''}</td><td>${c.description||''}</td><td><span class="tag ${c.priority==='CRITICAL'?'cr':c.priority==='HIGH'?'hi':'md'}">${c.priority||''}</span></td></tr>`;});h+=`</table>`;}
 const imp=g.estimated_ai_visibility_improvement||{};
-if(Object.keys(imp).length){h+=`<h4>Estimated Improvements</h4><table>`;Object.entries(imp).forEach(([k,v])=>{h+=`<tr><td><strong>${k.replace(/_/g,' ')}</strong></td><td>${v}</td></tr>`;});h+=`</table>`;}
+if(Object.keys(imp).length){h+=`<h4>Estimated Improvements</h4><table>`;Object.entries(imp).forEach(([k,v])=>{h+=`<tr><td><strong>${esc(k.replace(/_/g,' '))}</strong></td><td>${esc(String(v))}</td></tr>`;});h+=`</table>`;}
 h+=`</div>`;return h;}
 
 function renderTech(t){
-let h=`<div class="card"><h3>&#9881; Technical Payload</h3>`;
+let h=`<div class="card"><h3 class="section-click" onclick="openDetailValue('Technical Payload',window._rawB.output_3_technical_payload||{})" title="Click for full raw data">&#9881; Technical Payload <span class="cb-hint">(click for full detail)</span></h3>`;
 h+=`<div class="sg"><div class="sb b"><div class="v">${Object.keys(t.json_ld_schemas||{}).length}</div><div class="l">Schema Types</div></div><div class="sb ${(t.cannibalization_status||'')==='LOW'?'g':'r'}"><div class="v">${t.cannibalization_status||'N/A'}</div><div class="l">Cannibalization</div></div><div class="sb ${(t.hallucination_risk||'')==='MINIMAL'?'g':'r'}"><div class="v">${t.hallucination_risk||'N/A'}</div><div class="l">Hallucination Risk</div></div><div class="sb b"><div class="v">${t.dom_size||0}</div><div class="l">DOM Elements</div></div><div class="sb"><div class="v">${t.csr_rendering_status||'N/A'}</div><div class="l">Render Mode</div></div></div>`;
 const schemas=t.json_ld_schemas||{};
 if(Object.keys(schemas).length){h+=`<h4>JSON-LD Schemas (${Object.keys(schemas).length})</h4>`;Object.entries(schemas).forEach(([nm,sc])=>{const id='sch_'+nm.replace(/[^a-z0-9]/gi,'');h+=`<button class="json-toggle" onclick="document.getElementById('${id}').classList.toggle('open');this.textContent=document.getElementById('${id}').classList.contains('open')?'Hide ${nm.toUpperCase()} Schema':'Show ${nm.toUpperCase()} Schema'">&#128196; Show ${nm.toUpperCase()} Schema</button><div class="json-content" id="${id}"><pre><code>${hl(JSON.stringify(sc,null,2))}</code></pre></div>`;});}
 const il=t.internal_linking_blueprint||{};
-if(Object.keys(il).length){h+=`<h4>Internal Linking Blueprint</h4><table>`;Object.entries(il).forEach(([k,v])=>{if(typeof v!=='object')h+=`<tr><td><strong>${k.replace(/_/g,' ')}</strong></td><td>${v}</td></tr>`;});h+=`</table>`;}
+if(Object.keys(il).length){h+=`<h4>Internal Linking Blueprint</h4><table>`;Object.entries(il).forEach(([k,v])=>{if(typeof v!=='object')h+=`<tr><td><strong>${esc(k.replace(/_/g,' '))}</strong></td><td>${esc(String(v))}</td></tr>`;});h+=`</table>`;}
 const sv=t.schema_validation||{};
 if(Object.keys(sv).length){h+=`<h4>Schema Validation</h4><table><tr><th>Schema</th><th>Valid</th><th>Errors</th></tr>`;Object.entries(sv).forEach(([k,v])=>{h+=`<tr${v.valid?'':' class="issue"'}><td>${k}</td><td><span class="tag ${v.valid?'lo':'cr'}">${v.valid?'VALID':'INVALID'}</span></td><td>${(v.errors||[]).join('; ')||'None'}</td></tr>`;});h+=`</table>`;}
 const se=t.search_engine_coverage||{};
@@ -1078,13 +1838,13 @@ if(Object.keys(se).length){h+=`<h4>Search Engine Coverage</h4>`;if(se.engine_cov
 h+=`</div>`;return h;}
 
 function renderCDN(c){
-let h=`<div class="card"><h3>&#128231; CDN & Edge Deployment</h3>`;
+let h=`<div class="card"><h3 class="section-click" onclick="openDetailValue('CDN & Edge Deployment',window._rawB.output_4_cdn_deployment||{})" title="Click for full raw data">&#128231; CDN &amp; Edge Deployment <span class="cb-hint">(click for full detail)</span></h3>`;
 const ew=c.edge_worker_snippet||{};
 if(ew.worker_code){h+=`<h4>Edge Worker Code (${ew.cdn_provider||'Cloudflare'})</h4><pre><code>${ew.worker_code}</code></pre>`;if(ew.testing_steps){h+=`<h4>Testing Steps</h4><ul>`;ew.testing_steps.forEach(s=>{h+=`<li>${s}</li>`;});h+=`</ul>`;}}
 const sh=c.server_header_inspection||{};
 if(sh.inspection_results){h+=`<h4>Server Header Inspection</h4><table><tr><th>Header</th><th>Expected</th><th>Current</th><th>Status</th></tr>`;sh.inspection_results.forEach(r=>{h+=`<tr class="${r.status==='CORRECT'?'':'issue'}"><td>${r.header}</td><td style="font-size:.8rem">${r.expected}</td><td>${r.current}</td><td><span class="tag ${r.status==='CORRECT'?'lo':'cr'}">${r.status}</span></td></tr>`;});h+=`</table>`;}
 const pr=c.prerender_simulation||{};
-if(Object.keys(pr).length){h+=`<h4>Pre-Render Simulation</h4><table>`;Object.entries(pr).forEach(([k,v])=>{if(typeof v!=='object')h+=`<tr><td><strong>${k.replace(/_/g,' ')}</strong></td><td>${v}</td></tr>`;else if(v&&typeof v==='object'){Object.entries(v).forEach(([k2,v2])=>{h+=`<tr><td style="padding-left:16px">${k2.replace(/_/g,' ')}</td><td>${v2}</td></tr>`;});}});h+=`</table>`;}
+if(Object.keys(pr).length){h+=`<h4>Pre-Render Simulation</h4><table>`;Object.entries(pr).forEach(([k,v])=>{if(typeof v!=='object')h+=`<tr><td><strong>${esc(k.replace(/_/g,' '))}</strong></td><td>${esc(String(v))}</td></tr>`;else if(v&&typeof v==='object'){Object.entries(v).forEach(([k2,v2])=>{h+=`<tr><td style="padding-left:16px">${k2.replace(/_/g,' ')}</td><td>${v2}</td></tr>`;});}});h+=`</table>`;}
 const cd=c.cdn_configuration||{};
 if(Object.keys(cd).length){const id='cdn_cfg';h+=`<button class="json-toggle" onclick="document.getElementById('${id}').classList.toggle('open');this.textContent=document.getElementById('${id}').classList.contains('open')?'Hide CDN Config':'Show CDN Config'">&#128196; Show CDN Configuration</button><div class="json-content" id="${id}"><pre><code>${hl(JSON.stringify(cd,null,2))}</code></pre></div>`;}
 const dg=c.deployment_guide||{};
@@ -1092,7 +1852,7 @@ if(dg.deployment_steps){h+=`<h4>Deployment Guide</h4><ul>`;dg.deployment_steps.f
 h+=`</div>`;return h;}
 
 function renderSnt(s){
-let h=`<div class="card"><h3>&#128737; Post-Publish Sentinel Brief</h3>`;
+let h=`<div class="card"><h3 class="section-click" onclick="openDetailValue('Sentinel Brief',window._rawB.output_5_sentinel_brief||{})" title="Click for full raw data">&#128737; Post-Publish Sentinel Brief <span class="cb-hint">(click for full detail)</span></h3>`;
 const tc=s.tracking_configuration||{};
 if(tc.monitoring_targets){h+=`<h4>Monitoring Targets</h4><table><tr><th>Engine</th><th>Frequency</th><th>Queries</th><th>Metrics</th></tr>`;Object.entries(tc.monitoring_targets).forEach(([k,v])=>{h+=`<tr><td>${k.replace(/_/g,' ')}</td><td>${v.check_frequency||''}</td><td>${(v.queries_to_monitor||[]).length}</td><td>${(v.metrics||[]).join(', ')}</td></tr>`;});h+=`</table>`;}
 const at=s.alert_system||{};
@@ -1118,9 +1878,13 @@ return /^(ERROR|HIGH|CRITICAL|POOR|NO|FALSE|BAD|ISSUE|WARNING|VERIFY|ATTENTION|R
 function renderModule(mk,mr){
 if(!mr||typeof mr!=='object')return`<div class="card"><h3>${mk}: ${MN[mk]||''}</h3><p style="color:var(--txt3)">No data returned for this module.</p></div>`;
 if(mr.error)return`<div class="card"><h3>${mk}: ${MN[mk]||''}</h3><p style="background:var(--issue-fill);color:var(--issue-ink);font-weight:700;padding:10px 14px;border-radius:8px">Error: ${esc(mr.error)}</p></div>`;
-let h=`<div class="card"><h3>${mk}: ${MN[mk]||''}</h3>`;
+let h=`<div class="card mod-card" id="mc_${mk}">
+<div class="mod-head" onclick="toggleMod('${mk}')" title="Click to collapse / expand this module">
+<span class="mnum">${mk}</span><span class="mname">${MN[mk]||''}</span><span class="mcaret">&#9660;</span>
+</div>
+<div class="mod-body">`;
 try{
-const SKIPKEYS=['module','module_name','recommendations','implementation_steps','where_to_add','detailed_analysis'];
+const SKIPKEYS=['module','module_name','recommendations','implementation_steps','where_to_add','detailed_analysis','live_verified_statistics','competitive_benchmarking','score_benchmarks','recommendation_playbook'];
 const pretty=k=>esc(String(k).replace(/_/g,' '));
 function cell(val,kk){
 if(val==null)return'&mdash;';
@@ -1128,43 +1892,6 @@ if(typeof val==='object')return rv(val,kk);
 const s=String(val);
 return isIssue(val)?'<span class="issue">'+esc(s)+'</span>':esc(s);
 }
-function rv(v,k){
-if(v==null)return'<span class="dash">&mdash;</span>';
-if(typeof v==='boolean')return v?'<span class="ok">&#10003; Yes</span>':'<span class="no">&#10007; No</span>';
-if(typeof v==='number')return'<span class="num">'+esc(String(v))+'</span>';
-if(typeof v==='string')return isIssue(v)?'<span class="issue">'+esc(v)+'</span>':'<span class="str">'+esc(v)+'</span>';
-if(Array.isArray(v)){
-if(v.length===0)return'<span class="dash">&mdash;</span>';
-if(typeof v[0]==='object'&&v[0]!==null){
-let ks=[];try{ks=[...new Set(v.flatMap(i=>Object.keys(i)))];}catch(e){ks=Object.keys(v[0]||{});}
-if(ks.length){
-let t='<div style="overflow-x:auto"><table><tr>';ks.forEach(kk=>{t+='<th>'+pretty(kk)+'</th>';});t+='</tr>';
-v.slice(0,25).forEach(item=>{let rowIss=false;const c=ks.map(kk=>{let val=item[kk];if(!rowIss&&isIssue(val))rowIss=true;return '<td style="font-size:.8rem">'+((typeof val==='object'&&val!==null)?rv(val,kk):cell(val,kk))+'</td>';}).join('');t+='<tr'+(rowIss?' class="issue"':'')+'>'+c+'</tr>';});
-if(v.length>25)t+='<tr><td colspan="'+ks.length+'" class="more">+'+(v.length-25)+' more</td></tr>';
-return t+'</table></div>';
-}
-}
-return'<div class="chips">'+v.map(i=>'<span class="chip">'+esc(String(i))+'</span>').join('')+'</div>';
-}
-if(typeof v==='object'){
-const entries=Object.entries(v);
-if(!entries.length)return'<span class="dash">&mdash;</span>';
-if(entries.some(([,val])=>val&&typeof val==='object')){
-let s='<div class="subs">';
-entries.forEach(([kk,val])=>{
-s+='<div class="sub"><div class="subh">'+pretty(kk)+'</div><div class="subb">'+rv(val,kk)+'</div></div>';
-});
-return s+'</div>';
-}
-let t='<table class="kv2">';
-entries.forEach(([kk,val])=>{
-let rowIss=isIssue(val);
-t+='<tr'+(rowIss?' class="issue"':'')+'><th>'+pretty(kk)+'</th><td>'+rv(val,kk)+'</td></tr>';
-});
-return t+'</table>';
-}
-return esc(String(v));
-};
 const statKeys=Object.keys(mr).filter(k=>!SKIPKEYS.includes(k)&&typeof mr[k]==='number'&&/score|count|total|ratio|percentage|probability|rate|density|strength|readiness|coverage|freshness|depth|breadth|size|elements|words|minutes|risk|penalty|estimate|frequency|number|priority|index|percent|health|quality/i.test(k));
 const statShown=statKeys.slice(0,10);
 if(statShown.length){
@@ -1178,13 +1905,93 @@ let cls;
 if(pct){cls=v>=0.7?'g':v>=0.4?'y':'r';}
 else if(neg){cls=v>0?'r':'g';}
 else{cls=v===0?'y':'b';}
-h+=`<div class="sb ${cls}"><div class="v">${esc(disp)}</div><div class="l">${pretty(k)}</div></div>`;
+h+=`<div class="sb ${cls} clickable-block" onclick="openDetail(event,null,'${mk}','key',${JSON.stringify(k)})" title="Click for full detail"><div class="v">${esc(disp)}</div><div class="l">${pretty(k)}</div></div>`;
 });
 h+='</div>';
 }
+/* ===========================  ANALYSIS FIRST  =========================== */
+h+='<div class="mblock" style="border-color:rgba(124,92,252,.45);background:linear-gradient(135deg,rgba(124,92,252,.07),rgba(34,211,238,.04))"><div class="mh">&#128270; Full Analysis <span class="cb-hint">all findings for this module</span></div>';
+if(mr.score_benchmarks&&Array.isArray(mr.score_benchmarks)&&mr.score_benchmarks.length){
+h+='<div class="mblock cyan"><div class="mh">&#127942; Score Benchmarks <span class="cb-hint">what to aim for</span></div>';
+h+='<table class="tbl-click"><tr><th>Score</th><th>Your Value</th><th>Target</th><th>Status</th><th>What It Means For Rankings / AI Overview / AI Citations</th></tr>';
+mr.score_benchmarks.slice(0,12).forEach(b=>{
+const sc=b.scale==='0-100'?esc(String(b.value)):((b.value||0)<=1.5?Math.round((b.value||0)*100)+'%':esc(String(b.value)));
+const lvl=b.level||'unknown';
+const lc=lvl==='excellent'?'lo':lvl==='good'?'md':lvl==='needs_work'?'hi':'cr';
+const lt=lvl==='excellent'?'EXCELLENT':lvl==='good'?'GOOD':lvl==='needs_work'?'NEEDS WORK':'FAIL';
+const tg=b.scale==='0-100'?(b.target!==undefined?b.target+'%':'N/A'):((b.target||0)<=1.5?Math.round((b.target||0)*100)+'%':'N/A');
+h+='<tr class="dm-click" data-dm="'+dmRef(b,pretty(b.key))+'"><td><strong>'+pretty(b.key)+'</strong></td><td><strong class="'+(lvl==='excellent'?'ok':lvl==='good'?'num':lvl==='needs_work'?'no':'no')+'">'+sc+'</strong></td><td>'+tg+'</td><td><span class="tag '+lc+'">'+lt+'</span></td><td style="font-size:.78rem">R: '+esc(b.rankings||'')+'<br>A: '+esc(b.ai_overview||'')+'<br>C: '+esc(b.ai_citation||'')+'</td></tr>';
+});
+h+='</table><p style="font-size:.72rem;color:var(--txt3);margin-top:6px">Benchmarks are standard industry guidance (heuristic, unverified) - not measured ranking guarantees. Click any row for full detail.</p></div>';
+}
+if(mr.detailed_analysis&&typeof mr.detailed_analysis==='object'){
+h+='<div class="acc"><button class="accb open" onclick="this.classList.toggle(\'open\');this.nextElementSibling.classList.toggle(\'open\')">Detailed Analysis <span class="accarrow">&#9660;</span></button><div class="accp open">';
+Object.entries(mr.detailed_analysis).forEach(([k,v])=>{
+if(k==='score_benchmarks'||k==='live_verified_statistics')return;
+h+='<div class="acc"><button class="accb" onclick="this.classList.toggle(\'open\');this.nextElementSibling.classList.toggle(\'open\')">'+pretty(k)+' <span class="accarrow">&#9660;</span></button><div class="accp">'+rv(v,k)+'</div></div>';
+});
+h+='</div></div>';
+}
+if(mr.live_verified_statistics&&typeof mr.live_verified_statistics==='object'){
+const lvs=mr.live_verified_statistics;
+if(lvs.total_statistics){
+h+='<div class="acc"><button class="accb open" onclick="this.classList.toggle(\'open\');this.nextElementSibling.classList.toggle(\'open\')">Live Verified Statistics ('+lvs.total_statistics+') <span class="accarrow">&#9660;</span></button><div class="accp open"><table class="tbl-click"><tr><th style="width:8px">#</th><th>Statistic</th><th>Source</th></tr>';
+(lvs.statistics||[]).forEach((st,i)=>{
+const src=st.source_url||'';
+h+='<tr onclick="openDetail(event,null,\''+mk+'\',\'obj\',\'live_verified_statistics\')" title="Click for full detail"><td>'+(i+1)+'</td><td style="font-size:.8rem">'+esc(st.stat||'')+'</td><td style="font-size:.72rem;word-break:break-all">'+(src?'<a href="'+esc(src)+'" target="_blank" rel="noopener" onclick="event.stopPropagation()">'+esc(st.source_title||src.slice(0,60))+'</a>':'&mdash;')+'</td></tr>';
+});
+h+='</table></div></div>';
+}
+}
+if(mr.competitive_benchmarking&&typeof mr.competitive_benchmarking==='object'){
+h+='<div class="acc"><button class="accb open" onclick="this.classList.toggle(\'open\');this.nextElementSibling.classList.toggle(\'open\')">Competitive Benchmarking <span class="accarrow">&#9660;</span></button><div class="accp open">';
+h+='<p style="font-size:.78rem;color:var(--txt3);margin-bottom:8px">'+esc(mr.competitive_benchmarking.methodology||'')+'</p>';
+h+='<div class="sg">';
+if(mr.competitive_benchmarking.competitors_analyzed!==undefined)h+='<div class="sb b clickable-block" onclick="openDetail(event,null,\''+mk+'\',\'obj\',\'competitive_benchmarking\')" title="Click for full detail"><div class="v">'+mr.competitive_benchmarking.competitors_analyzed+'</div><div class="l">Competitors Analyzed</div></div>';
+const ccb=mr.competitive_benchmarking.competitor_content_benchmarks||{};
+if(ccb.average_word_count!==undefined)h+='<div class="sb"><div class="v">'+ccb.average_word_count+'</div><div class="l">Competitor Avg Words</div></div>';
+const yvc=mr.competitive_benchmarking.your_content_vs_competitors||{};
+if(yvc.word_count_delta_percent!==undefined&&yvc.word_count_delta_percent!==null)h+='<div class="sb '+(yvc.word_count_delta_percent>=0?'g':'r')+'"><div class="v">'+(yvc.word_count_delta_percent>0?'+':'')+yvc.word_count_delta_percent+'%</div><div class="l">Word Count Delta vs Avg</div></div>';
+h+='</div>';
+h+='<div class="acc"><button class="accb" onclick="this.classList.toggle(\'open\');this.nextElementSibling.classList.toggle(\'open\')">Full Benchmarking Data <span class="accarrow">&#9660;</span></button><div class="accp">'+rv(mr.competitive_benchmarking,'competitive_benchmarking')+'</div></div>';
+h+='</div></div>';
+}
+Object.keys(mr).forEach(k=>{
+if(SKIPKEYS.includes(k)||statShown.includes(k))return;
+h+='<div class="mblock clickable-block" onclick="openDetail(event,null,\''+mk+'\',\'key\',\''+k+'\')" title="Click for full detail"><div class="mh">'+pretty(k)+' <span class="cb-hint">(click for full detail)</span></div>'+rv(mr[k],k)+'</div>';
+});
+h+='</div>';
+/* ===========================  RECOMMENDATIONS AFTER ANALYSIS  =========================== */
+if(mr.recommendation_playbook&&typeof mr.recommendation_playbook==='object'){
+const pb=mr.recommendation_playbook;
+h+='<div class="mblock" style="border-color:rgba(52,211,153,.5);background:linear-gradient(135deg,rgba(52,211,153,.06),rgba(251,191,36,.04))"><div class="mh">&#9889; Recommendations &amp; Action Plan <span class="cb-hint">after analysis above</span></div>';
+h+='<div class="acc"><button class="accb open" onclick="this.classList.toggle(\'open\');this.nextElementSibling.classList.toggle(\'open\')">What To Do <span class="accarrow">&#9660;</span></button><div class="accp open"><ol class="steps">';
+(pb.what_to_do||[]).forEach(w=>{h+='<li>'+esc(String(w))+'</li>';});
+h+='</ol></div></div>';
+h+='<div class="acc"><button class="accb" onclick="this.classList.toggle(\'open\');this.nextElementSibling.classList.toggle(\'open\')">When To Do It <span class="accarrow">&#9660;</span></button><div class="accp"><ul class="where">';
+(pb.when_to_do||[]).forEach(w=>{h+='<li>'+esc(String(w))+'</li>';});
+h+='</ul></div></div>';
+h+='<div class="acc"><button class="accb" onclick="this.classList.toggle(\'open\');this.nextElementSibling.classList.toggle(\'open\')">Tools To Use <span class="accarrow">&#9660;</span></button><div class="accp"><table class="tbl-click"><tr><th>Tool</th><th>How To Use It</th></tr>';
+(pb.tools_to_use||[]).forEach(t=>{
+const rid=dmRef(t,'tool');
+h+='<tr class="dm-click" data-dm="'+rid+'"><td><strong>'+esc(t.tool||'')+'</strong></td><td style="font-size:.82rem">'+esc(t.use||'')+'</td></tr>';
+});
+h+='</table></div></div>';
+const ab=pb.ab_test_plan||{};
+if(Object.keys(ab).length){
+h+='<div class="acc"><button class="accb" onclick="this.classList.toggle(\'open\');this.nextElementSibling.classList.toggle(\'open\')">A/B Test Plan - How To Verify It Works <span class="accarrow">&#9660;</span></button><div class="accp">';
+h+='<table class="kv2 tbl-click">';
+[['Hypothesis',ab.hypothesis],['Variant A',ab.variant_a],['Variant B',ab.variant_b],['Metrics',(ab.metrics||[]).join(', ')],['Duration',(ab.duration_days||'')+' days'],['How To Judge',ab.check]].forEach(([k2,v2])=>{
+const rid=dmRef(ab,k2);
+h+='<tr class="dm-click" data-dm="'+rid+'" data-dml="'+esc('A/B test > '+k2)+'"><th>'+esc(k2)+'</th><td>'+esc(String(v2||''))+'</td></tr>';
+});
+h+='</table></div></div>';
+}
+h+='</div>';
+} else {
 if(mr.recommendations&&mr.recommendations.length){
 h+='<div class="mblock"><div class="mh">&#9889; Recommendations</div>';
-h+='<table><tr><th style="width:120px">Priority</th><th>Action</th><th>Detail</th></tr>';
+h+='<table class="tbl-click"><tr><th style="width:120px">Priority</th><th>Action</th><th>Detail</th></tr>';
 mr.recommendations.forEach(r=>{
 const p=r.priority||'MEDIUM';
 const pc=p==='CRITICAL'?'cr':p==='HIGH'?'hi':p==='LOW'?'lo':'md';
@@ -1203,19 +2010,107 @@ h+='<div class="mblock cyan"><div class="mh">&#128205; Where To Add</div><ul cla
 mr.where_to_add.forEach(s=>{h+='<li>'+esc(String(s))+'</li>';});
 h+='</ul></div>';
 }
-if(mr.detailed_analysis&&typeof mr.detailed_analysis==='object'){
-h+='<div class="mblock"><div class="mh">&#128269; Detailed Analysis</div>';
-Object.entries(mr.detailed_analysis).forEach(([k,v])=>{
-h+='<div class="acc"><button class="accb" onclick="this.classList.toggle(\'open\');this.nextElementSibling.classList.toggle(\'open\')">'+pretty(k)+' <span class="accarrow">&#9660;</span></button><div class="accp">'+rv(v,k)+'</div></div>';
-});
-h+='</div>';
 }
-Object.keys(mr).forEach(k=>{
-if(SKIPKEYS.includes(k)||statShown.includes(k))return;
-h+='<div class="mblock"><div class="mh">'+pretty(k)+'</div>'+rv(mr[k],k)+'</div>';
-});
 }catch(e){h+='<p style="background:var(--issue-fill);color:var(--issue-ink);padding:12px;border-radius:8px;font-weight:700">Render error: '+esc(e.message)+'</p>';}
-h+=`</div>`;return h;}
+h+=`</div></div>`;return h;}
+function prettyK(k){return esc(String(k).replace(/_/g,' '));}
+window._dmSeq=0;window._dmCache={};
+function dmRef(value,label){
+const id='dm_'+(++window._dmSeq);
+try{window._dmCache[id]=(typeof value==='string')?value:JSON.parse(JSON.stringify(value));}catch(e){window._dmCache[id]=String(value);}
+return id;
+}
+function dmHtml(value,label,extraClass){
+const id=dmRef(value,label);
+return `<span class="dm-click ${extraClass||''}" data-dm="${id}" data-dml="${esc(label||'')}" title="Click for full detail">${esc(label!=null?label:'')}</span>`;
+}
+document.addEventListener('click',function(ev){
+const t=ev.target.closest('.dm-click');
+if(!t)return;
+ev.stopPropagation();
+const id=t.getAttribute('data-dm');
+const lbl=t.getAttribute('data-dml');
+let val=window._dmCache[id];
+if(val===undefined){if(t.textContent!=='')val=t.textContent;}
+openDetailValue(lbl||'Detail',val);
+});
+function openDetailValue(title,dataVal){
+const body=document.createElement('div');
+body.className='detail-modal';
+body.id='detailModal';
+body.innerHTML='<div class="dm-box"><button class="dm-close" onclick="document.getElementById(\'detailModal\').remove()">&#10005; Close</button><div class="dm-title">'+title+'</div><div>'+rv(dataVal,'detail')+'</div><div style="margin-top:14px"><button class="btn" style="width:auto;padding:8px 16px;font-size:.82rem;background:var(--txt);color:var(--bg)" onclick="copyText(window._detailJson)">Copy JSON</button></div></div>';
+window._detailJson=JSON.stringify(dataVal);
+body.onclick=e=>{if(e.target===body)body.remove();};
+document.body.appendChild(body);
+}
+function rv(v,k){
+if(v==null)return'<span class="dash">&mdash;</span>';
+if(typeof v==='boolean')return v?'<span class="ok">&#10003; Yes</span>':'<span class="no">&#10007; No</span>';
+if(typeof v==='number')return'<span class="num">'+esc(String(v))+'</span>';
+if(typeof v==='string')return isIssue(v)?'<span class="issue">'+esc(v)+'</span>':'<span class="str">'+esc(v)+'</span>';
+if(Array.isArray(v)){
+if(v.length===0)return'<span class="dash">&mdash;</span>';
+if(typeof v[0]==='object'&&v[0]!==null){
+let ks=[];try{ks=[...new Set(v.flatMap(i=>Object.keys(i)))];}catch(e){ks=Object.keys(v[0]||{});}
+if(ks.length){
+let t='<div style="overflow-x:auto"><table class="tbl-click">';ks.forEach(kk=>{t+='<th>'+prettyK(kk)+'</th>';});t+='</tr>';
+v.slice(0,25).forEach((item,idx)=>{
+const rid=dmRef(item,k+' item '+(idx+1));
+let rowIss=false;const c=ks.map(kk=>{let val=item[kk];if(!rowIss&&isIssue(val))rowIss=true;return '<td style="font-size:.8rem">'+((typeof val==='object'&&val!==null)?rv(val,kk):cellGlobal(val,kk))+'</td>';}).join('');
+t+='<tr class="dm-click" data-dm="'+rid+'" data-dml="'+esc(k)+' item '+(idx+1)+'" title="Click for full detail"'+(rowIss?' data-iss="1"':'')+'>'+c+'</tr>';
+});
+if(v.length>25)t+='<tr><td colspan="'+ks.length+'" class="more">+'+(v.length-25)+' more</td></tr>';
+return t+'</table></div>';
+}
+}
+const chipIds=v.map(i=>dmRef(i,k));
+return'<div class="chips">'+v.map((i,idx)=>'<span class="chip dm-click" data-dm="'+chipIds[idx]+'" data-dml="'+esc(k)+'" title="Click for full detail">'+esc(String(i))+'</span>').join('')+'</div>';
+}
+if(typeof v==='object'){
+const entries=Object.entries(v);
+if(!entries.length)return'<span class="dash">&mdash;</span>';
+if(entries.some(([,val])=>val&&typeof val==='object')){
+let s='<div class="subs">';
+entries.forEach(([kk,val])=>{
+const rid=dmRef({[kk]:val},k+' > '+kk);
+s+='<div class="sub dm-click" data-dm="'+rid+'" data-dml="'+esc(k+' > '+kk)+'" title="Click for full detail"><div class="subh">'+prettyK(kk)+'</div><div class="subb">'+rv(val,kk)+'</div></div>';
+});
+return s+'</div>';
+}
+let t='<table class="kv2 tbl-click">';
+entries.forEach(([kk,val])=>{
+const rid=dmRef({[kk]:val},k+' > '+kk);
+let rowIss=isIssue(val);
+t+='<tr class="dm-click" data-dm="'+rid+'" data-dml="'+esc(k+' > '+kk)+'" title="Click for full detail"'+(rowIss?' data-iss="1"':'')+'><th>'+prettyK(kk)+'</th><td>'+rv(val,kk)+'</td></tr>';
+});
+return t+'</table>';
+}
+return esc(String(v));
+}
+function cellGlobal(val,kk){
+if(val==null)return'&mdash;';
+if(typeof val==='object')return rv(val,kk);
+const s=String(val);
+return isIssue(val)?'<span class="issue">'+esc(s)+'</span>':esc(s);
+}
+function toggleMod(mk){const c=document.getElementById('mc_'+mk);if(c)c.classList.toggle('closed');}
+function openDetail(ev,el,mk,type,key){
+if(ev)ev.stopPropagation();
+if(ev&&ev.target&&ev.target.closest&&ev.target.closest('.dm-click'))return;
+const mr=(window._rawMr||{})[mk]||{};
+let title=mk+': '+(MN[mk]||'');
+let dataVal;
+if(type==='key'&&key!==undefined){dataVal=mr[key];title+=' &rarr; '+prettyK(key);}
+else if(type==='obj'&&key!==undefined){dataVal=mr[key];title+=' &rarr; '+prettyK(key);}
+else dataVal=mr;
+const body=document.createElement('div');
+body.className='detail-modal';
+body.id='detailModal';
+body.innerHTML='<div class="dm-box"><button class="dm-close" onclick="document.getElementById(\'detailModal\').remove()">&#10005; Close</button><div class="dm-title">'+title+'</div><div>'+rv(dataVal,'detail')+'</div><div style="margin-top:14px"><button class="btn" style="width:auto;padding:8px 16px;font-size:.82rem;background:var(--txt);color:var(--bg)" onclick="copyText(window._detailJson)">Copy JSON</button></div></div>';
+window._detailJson=JSON.stringify(dataVal);
+body.onclick=e=>{if(e.target===body)body.remove();};
+document.body.appendChild(body);
+}
 
 function hl(j){return j.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"([^"]+)"(?=\s*:)/g,'<span class="jk">"$1"</span>').replace(/"([^"]*)"/g,'<span class="js">"$1"</span>').replace(/\b(-?\d+\.?\d*)\b/g,'<span class="jn">$1</span>').replace(/\b(true|false|null)\b/g,'<span class="jb">$1</span>');}
 </script>
@@ -1226,5 +2121,11 @@ if __name__=='__main__':
     print("\n"+"="*60)
     print("  Intent, Entity & Semantic Intelligence Platform")
     print("  Web Interface: http://localhost:5000")
+    print("  DEPLOYMENT: localhost only. For LAN/prod use gunicorn/waitress + nginx")
+    print("    reverse proxy (TLS, HSTS, rate-limit at edge). Never expose Flask dev")
+    print("    server directly. Set APP_DEBUG=false (default) so 500s never leak traces.")
+    print("    SERP_PROVIDER=serper|dataforseo|ddg_fallback (default ddg_fallback).")
     print("="*60+"\n")
-    app.run(host='0.0.0.0',port=5000,debug=False,threaded=True)
+    host=os.environ.get("HOST","127.0.0.1")
+    port=int(os.environ.get("PORT","5000"))
+    app.run(host=host,port=port,debug=False,threaded=True)

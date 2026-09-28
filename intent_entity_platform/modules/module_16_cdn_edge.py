@@ -66,6 +66,7 @@ class CDNEdgePreviewer:
             "deployment_guide": deployment_guide,
             "recommendations": self._generate_recommendations(cdn_provider, edge_worker, server_headers),
             "performance_optimization": {
+                "data_origin": "unverified_industry_heuristic - not measured for this page",
                 "estimated_ttfb_improvement": "40-60ms reduction with edge caching",
                 "cache_hit_ratio_target": "95%+ for static content, 80%+ for dynamic",
                 "bandwidth_savings": "30-50% reduction in origin requests",
@@ -83,7 +84,8 @@ class CDNEdgePreviewer:
                 "x_content_type_options": {"status": "RECOMMENDED", "value": "nosniff"},
                 "referrer_policy": {"status": "RECOMMENDED", "value": "strict-origin-when-cross-origin"},
                 "permissions_policy": {"status": "RECOMMENDED", "value": "geolocation=(), microphone=(), camera=()"},
-                "overall_security_score": "85/100 - Good, implement remaining headers"
+                "overall_security_score": "85/100 - Good, implement remaining headers",
+                "overall_security_score_origin": "unverified_industry_heuristic - not measured for this page"
             },
             "edge_computing_strategies": {
                 "a_b_testing": "Route traffic through edge workers for variant serving",
@@ -94,6 +96,7 @@ class CDNEdgePreviewer:
                 "edge_side_includes": "Use ESI for personalized page fragments"
             },
             "monitoring_and_observability": {
+                "data_origin": "unverified_industry_heuristic - not measured for this page",
                 "key_metrics": [
                     "Cache Hit Ratio (target: >90%)",
                     "TTFB by region (target: <100ms)",
@@ -113,7 +116,7 @@ class CDNEdgePreviewer:
             "implementation_steps": [
                 "Step 1: Choose your CDN provider and create an account if not already set up (Cloudflare, Fastly, Akamai, or CloudFront)",
                 "Step 2: Copy the generated edge worker snippet and create a new Worker/Edge Function in your CDN dashboard",
-                "Step 3: Configure the route pattern to match your target content URLs (e.g., example.com/blog/*)",
+                "Step 3: Configure the route pattern to match your target content URLs (e.g., your-domain.com/blog/*)",
                 "Step 4: Set environment variables for schema TTL and cache behavior in the Worker settings",
                 "Step 5: Deploy the Worker to a staging or preview environment first for validation",
                 "Step 6: Use curl with a Googlebot User-Agent to verify schema injection appears in the page source",
@@ -138,6 +141,7 @@ class CDNEdgePreviewer:
             ],
             "detailed_analysis": {
                 "performance_benchmarks": {
+                    "data_origin": "unverified_industry_heuristic - not measured for this page",
                     "edge_caching_ttfb_improvement": "40-60ms reduction in Time to First Byte vs. origin-only serving",
                     "cache_hit_ratio_target": "95%+ for static content, 80%+ for semi-dynamic content",
                     "bandwidth_savings": "30-50% reduction in origin server requests with proper caching",
@@ -172,9 +176,9 @@ class CDNEdgePreviewer:
                     "Ignoring CDN billing - edge compute and bandwidth costs can spike with high-traffic sites"
                 ],
                 "success_metrics": [
-                    "Track TTFB improvement by region (target: <100ms for 95th percentile globally)",
-                    "Monitor cache hit ratio weekly (target: >90% for content pages)",
-                    "Measure origin request reduction (target: 30-50% fewer origin hits)",
+                    "(General industry guidance, unverified): Track TTFB improvement by region (target: <100ms for 95th percentile globally)",
+                    "(General industry guidance, unverified): Monitor cache hit ratio weekly (target: >90% for content pages)",
+                    "(General industry guidance, unverified): Measure origin request reduction (target: 30-50% fewer origin hits)",
                     "Verify schema injection with Google Rich Results Test weekly",
                     "Track Worker execution time and error rate via CDN analytics dashboard"
                 ]
@@ -216,14 +220,14 @@ class CDNEdgePreviewer:
             edge_injection_opportunities.append({
                 "opportunity": "Schema Injection via Edge Worker",
                 "detail": "Page has no structured data - inject Article/BlogPosting JSON-LD at edge",
-                "estimated_impact": "10-30% CTR improvement from rich results eligibility",
+                "estimated_impact": "(General industry guidance, unverified): 10-30% CTR improvement from rich results eligibility",
                 "implementation": "Cloudflare Worker or Fastly VCL to inject schema before response"
             })
         if len(h2s) > 0:
             edge_injection_opportunities.append({
                 "opportunity": "Dynamic Meta Description Enhancement",
                 "detail": f"Page has {len(h2s)} H2 sections - generate meta description from first H2",
-                "estimated_impact": "5-15% CTR improvement from optimized meta descriptions",
+                "estimated_impact": "(General industry guidance, unverified): 5-15% CTR improvement from optimized meta descriptions",
                 "implementation": "Edge worker extracts H1 and first H2 to generate meta description"
             })
         if word_count > 1000:
@@ -277,6 +281,7 @@ class CDNEdgePreviewer:
             "estimated_page_size_kb": round(estimated_page_size_kb, 1),
             "estimated_baseline_ttfb_ms": estimated_ttfb_ms,
             "cdn_caching_strategy": {
+                "data_origin": "unverified_industry_heuristic - not measured for this page",
                 "recommended_ttl": "3600 seconds (1 hour) for content pages",
                 "stale_while_revalidate": "86400 seconds (24 hours)",
                 "cache_invalidation_trigger": "On content publish/update via webhook",
@@ -326,7 +331,7 @@ class CDNEdgePreviewer:
             "cdn_provider": cdn,
             "worker_code": snippet,
             "worker_type": "javascript",
-            "estimated_execution_time": "< 5ms",
+            "estimated_execution_time": "(General industry guidance, unverified): < 5ms",
             "cache_behavior": "Edge-cached, invalidated on content update",
             "preview_url": f"https://preview.{cdn}.workers.dev/[path]",
             "testing_steps": [
@@ -458,10 +463,18 @@ class CDNEdgePreviewer:
 
     def _generate_cdn_config(self, cdn: str, inputs: Dict) -> Dict[str, Any]:
         """Generate CDN configuration."""
+        brand_website = (inputs.get("brand_website", "") or "").strip().rstrip("/")
+        host = brand_website
+        if host.startswith("http://"):
+            host = host[len("http://"):]
+        elif host.startswith("https://"):
+            host = host[len("https://"):]
+        if not host:
+            host = "{YOUR_DOMAIN}"
         configs = {
             "cloudflare": {
                 "worker_name": "schema-inject-worker",
-                "route_pattern": f"example.com/{inputs.get('url_path', '*')}",
+                "route_pattern": f"{host}/{inputs.get('url_path', '*')}",
                 "kv_namespace": "SCHEMA_CACHE",
                 "env_variables": {"SCHEMA_TTL": "3600"},
                 "pages_config": {"build_command": "npm run build", "output_dir": "dist"}

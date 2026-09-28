@@ -20,20 +20,36 @@ class GEOAEOSimulator:
         self.engines = ["google_ai_overview", "perplexity", "chatgpt", "gemini", "copilot"]
 
     def analyze(self, inputs: Dict[str, Any], serp_data: Dict[str, Any]) -> Dict[str, Any]:
-        """Full GEO and AEO simulation pipeline."""
+        """Full GEO and AEO simulation pipeline with REAL competitor data."""
         seed_phrase = inputs.get("seed_phrase", "")
         primary_entity = inputs.get("primary_entity", "")
         locale = inputs.get("locale", "en-US")
         competitor_content = inputs.get("competitor_content", [])
         url_data = inputs.get("_url_data", None)
-
+        
+        # NEW: Use real competitor data from live fetches
+        real_competitor_pages = inputs.get("real_competitor_pages", [])
+        real_content_analysis = inputs.get("real_content_analysis", {})
+        real_competitor_entities = inputs.get("real_competitor_entities", {})
+        real_serp_results = inputs.get("real_serp_results", [])
+        
+        # Build enhanced competitor content from real data
+        enhanced_competitor_content = list(competitor_content)
+        for page in real_competitor_pages:
+            if page.get("fetch_success"):
+                enhanced_competitor_content.append(page.get("page_text", ""))
+                enhanced_competitor_content.extend(page.get("h2s", []))
+        
         engine_profiles = self._build_engine_profiles(seed_phrase, primary_entity)
-        citation_sources = self._map_citation_sources(seed_phrase, competitor_content)
-        answer_triggers = self._detect_answer_triggers(seed_phrase, competitor_content)
-        geo_readiness = self._assess_geo_readiness(seed_phrase, competitor_content)
+        citation_sources = self._map_citation_sources(seed_phrase, enhanced_competitor_content)
+        answer_triggers = self._detect_answer_triggers(seed_phrase, enhanced_competitor_content)
+        geo_readiness = self._assess_geo_readiness(seed_phrase, enhanced_competitor_content)
         aeo_optimization = self._generate_aeo_strategy(seed_phrase, primary_entity, serp_data)
         engine_specific_strategies = self._generate_engine_strategies(seed_phrase, primary_entity)
-        citation_gap_analysis = self._analyze_citation_gaps(citation_sources, competitor_content)
+        citation_gap_analysis = self._analyze_citation_gaps(citation_sources, enhanced_competitor_content)
+        
+        # NEW: Add real competitor analysis insights
+        real_competitor_geo_insights = self._analyze_real_competitor_geo(real_competitor_pages, seed_phrase, primary_entity)
 
         url_geo_analysis = self._analyze_url_geo_readiness(url_data, seed_phrase, primary_entity) if url_data else None
 
@@ -51,7 +67,10 @@ class GEOAEOSimulator:
             "recommendations": self._generate_recommendations(engine_profiles, answer_triggers, geo_readiness),
             "implementation_steps": self._generate_implementation_steps(engine_profiles, citation_sources, answer_triggers, geo_readiness),
             "where_to_add": self._generate_where_to_add(answer_triggers, citation_sources),
-            "detailed_analysis": self._generate_detailed_analysis(engine_profiles, citation_sources, answer_triggers, geo_readiness, citation_gap_analysis)
+            "detailed_analysis": self._generate_detailed_analysis(engine_profiles, citation_sources, answer_triggers, geo_readiness, citation_gap_analysis),
+            "real_competitor_analysis": real_competitor_geo_insights,
+            "data_source": "real_time_competitor_analysis",
+            "competitors_analyzed": len([p for p in real_competitor_pages if p.get("fetch_success")])
         }
 
         if url_data and url_geo_analysis:
@@ -60,6 +79,107 @@ class GEOAEOSimulator:
             result["detailed_analysis"]["url_geo_insights"] = url_geo_analysis
 
         return result
+
+    def _analyze_real_competitor_geo(self, competitor_pages: List[Dict], seed_phrase: str, primary_entity: str) -> Dict[str, Any]:
+        """Analyze real competitor pages for GEO/AEO signals - VERIFIED LIVE DATA."""
+        if not competitor_pages:
+            return {"error": "No competitor data available", "source": "N/A"}
+        
+        successful_pages = [p for p in competitor_pages if p.get("fetch_success")]
+        if not successful_pages:
+            return {"error": "No successful competitor fetches", "source": "N/A"}
+        
+        # Analyze each competitor for GEO signals
+        competitor_geo_analysis = []
+        for page in competitor_pages:
+            if not page.get("fetch_success"):
+                continue
+            page_text = page.get("page_text", "")
+            title = page.get("title", "")
+            h2s = page.get("h2s", [])
+            word_count = page.get("word_count", 0)
+            has_schema = page.get("has_schema", False)
+            
+            # Count GEO signals in real competitor content
+            definitions = len(re.findall(
+                r'(?:' + re.escape(primary_entity.lower()) + r')\s+(?:is a|is an|refers to|means|is defined as)',
+                page_text, re.IGNORECASE
+            )) if primary_entity else 0
+            
+            statistics = len(re.findall(r'\d+(?:\.\d+)?%', page_text))
+            citations = len(re.findall(r'(?:according to|source:|cited by|based on|research by|study by)', page_text, re.IGNORECASE))
+            expert_quotes = len(re.findall(r'"[^"]{20,}"\s*[-—]\s*[A-Z][a-z]+\s+[A-Z][a-z]+', page_text))
+            named_entities = len(re.findall(r'[A-Z][a-z]+(?:\s+[A-Z][a-z]+)*\s+(?:Inc|Corp|LLC|University|Institute|Company|Group|Foundation)', page_text))
+            numbered_lists = len(re.findall(r'(?:^|\n)\s*\d+[\.\)]\s+', page_text, re.MULTILINE))
+            
+            competitor_geo_analysis.append({
+                "url": page.get("url", ""),
+                "position": page.get("position", 0),
+                "title": title,
+                "word_count": word_count,
+                "h2_count": len(h2s),
+                "geo_signals": {
+                    "definitions": definitions,
+                    "statistics": statistics,
+                    "citations": citations,
+                    "expert_quotes": expert_quotes,
+                    "named_entities": named_entities,
+                    "numbered_lists": numbered_lists,
+                    "has_schema": has_schema
+                },
+                "serp_title": page.get("serp_title", ""),
+                "serp_snippet": page.get("serp_snippet", "")
+            })
+        
+        # Calculate averages across competitors
+        avg_word_count = sum(c["word_count"] for c in competitor_geo_analysis) / len(competitor_geo_analysis) if competitor_geo_analysis else 0
+        avg_definitions = sum(c["geo_signals"]["definitions"] for c in competitor_geo_analysis) / len(competitor_geo_analysis) if competitor_geo_analysis else 0
+        avg_statistics = sum(c["geo_signals"]["statistics"] for c in competitor_geo_analysis) / len(competitor_geo_analysis) if competitor_geo_analysis else 0
+        avg_citations = sum(c["geo_signals"]["citations"] for c in competitor_geo_analysis) / len(competitor_geo_analysis) if competitor_geo_analysis else 0
+        schema_usage = sum(1 for c in competitor_geo_analysis if c["geo_signals"]["has_schema"])
+        
+        # Generate recommendations based on real competitor analysis
+        recommendations = []
+        if avg_definitions < 3:
+            recommendations.append({
+                "priority": "CRITICAL",
+                "action": f"Add {3 - int(avg_definitions)} more definition blocks (competitors average {avg_definitions:.1f})",
+                "detail": "Real competitors have 3+ definition blocks. AI Overview extracts these directly."
+            })
+        if avg_statistics < 5:
+            recommendations.append({
+                "priority": "HIGH",
+                "action": f"Add {5 - int(avg_statistics)} more statistics (competitors average {avg_statistics:.1f})",
+                "detail": "Perplexity favors content with 5+ statistics with source attribution."
+            })
+        if avg_citations < 3:
+            recommendations.append({
+                "priority": "HIGH",
+                "action": f"Add {3 - int(avg_citations)} more source attributions (competitors average {avg_citations:.1f})",
+                "detail": "Generative engines require verifiable sources for citation."
+            })
+        if schema_usage < len(competitor_geo_analysis) * 0.5:
+            recommendations.append({
+                "priority": "HIGH",
+                "action": f"Implement schema markup ({schema_usage}/{len(competitor_geo_analysis)} competitors have schema)",
+                "detail": "Schema markup is critical for AI Overview and Knowledge Graph alignment."
+            })
+        
+        return {
+            "competitors_analyzed": len(competitor_geo_analysis),
+            "competitor_details": competitor_geo_analysis,
+            "benchmarks_from_real_data": {
+                "avg_word_count": round(avg_word_count),
+                "avg_definitions_per_page": round(avg_definitions, 1),
+                "avg_statistics_per_page": round(avg_statistics, 1),
+                "avg_citations_per_page": round(avg_citations, 1),
+                "schema_usage_percentage": round(schema_usage / len(competitor_geo_analysis) * 100, 1) if competitor_geo_analysis else 0,
+                "schema_users": f"{schema_usage}/{len(competitor_geo_analysis)}"
+            },
+            "recommendations_based_on_real_competitors": recommendations,
+            "data_source": "live_competitor_page_analysis",
+            "fetch_timestamp": datetime.now().isoformat() if 'datetime' in dir() else "N/A"
+        }
 
     def _analyze_url_geo_readiness(self, url_data: Dict, seed_phrase: str, primary_entity: str) -> Dict[str, Any]:
         """Deep analysis of actual URL content for GEO/AEO readiness."""
@@ -194,8 +314,8 @@ class GEOAEOSimulator:
             "engine_readiness": engine_readiness,
             "geo_issues": geo_issues,
             "geo_issues_count": len(geo_issues),
-            "citation_density": f"{len(citation_patterns) / max(1, word_count / 200):.2f} citations per 200 words (target: 1-2)",
-            "statistic_density": f"{len(statistics_in_page) / max(1, len(h2s)):.1f} statistics per H2 section (target: 2-3)",
+            "citation_density": f"{len(citation_patterns) / max(1, word_count / 200):.2f} citations per 200 words (unverified heuristic target: 1-2)",
+            "statistic_density": f"{len(statistics_in_page) / max(1, len(h2s)):.1f} statistics per H2 section (unverified heuristic target: 2-3)",
             "specific_recommendations": self._generate_geo_url_recommendations(url_data, seed_phrase, primary_entity)
         }
 
@@ -216,7 +336,7 @@ class GEOAEOSimulator:
             recs.append({
                 "priority": "CRITICAL",
                 "action": f"Add {3 - len(definition_blocks)} more 40-60 word definition blocks for AI Overview extraction",
-                "detail": f"Only {len(definition_blocks)} definition block(s) found. AI Overview cites content with 3-5 definition paragraphs. Format: '[Entity] is a [category] that [function]. It enables [users] to [benefit] through [mechanism].'"
+                "detail": f"Only {len(definition_blocks)} definition block(s) found. (General industry guidance, unverified): AI Overview cites content with 3-5 definition paragraphs. Format: '[Entity] is a [category] that [function]. It enables [users] to [benefit] through [mechanism].'"
             })
 
         statistics = re.findall(r'\d+(?:\.\d+)?%', page_text)
@@ -224,7 +344,7 @@ class GEOAEOSimulator:
             recs.append({
                 "priority": "HIGH",
                 "action": f"Add {3 - len(statistics)} more statistics with source attribution",
-                "detail": f"Only {len(statistics)} statistic(s) found. Perplexity cites content with 3+ statistics per section. Format: 'According to [Source], [statistic].'"
+                "detail": f"Only {len(statistics)} statistic(s) found. (General industry guidance, unverified): Perplexity cites content with 3+ statistics per section. Format: 'According to [Source], [statistic].'"
             })
 
         citations = re.findall(r'(?:according to|source:|cited by|based on)', page_text, re.IGNORECASE)
@@ -279,7 +399,7 @@ class GEOAEOSimulator:
         return {
             "google_ai_overview": {
                 "engine_type": "traditional_search_ai",
-                "citation_behavior": "Cites 3-5 sources, prefers authoritative domains with structured data",
+                "citation_behavior": "(General industry guidance, unverified): Cites 3-5 sources, prefers authoritative domains with structured data",
                 "content_preferences": [
                     "Direct definition paragraphs (40-60 words)",
                     "Numbered lists and step-by-step guides",
@@ -301,12 +421,14 @@ class GEOAEOSimulator:
                     "Entity match strength to query intent"
                 ],
                 "citation_trigger_probability": 0.85,
+                "estimate": True,
+                "source": "heuristic, not measured",
                 "recommended_content_length": "2000-3500 words",
                 "recommended_schema_types": ["TechArticle", "FAQPage", "HowTo"]
             },
             "perplexity": {
                 "engine_type": "ai_native_search",
-                "citation_behavior": "Cites 5-10 sources with inline citations, heavily favors recent and authoritative content",
+                "citation_behavior": "(General industry guidance, unverified): Cites 5-10 sources with inline citations, heavily favors recent and authoritative content",
                 "content_preferences": [
                     "Recent, data-rich content with verifiable claims",
                     "Primary research and original statistics",
@@ -328,12 +450,14 @@ class GEOAEOSimulator:
                     "Content specificity and unique data points"
                 ],
                 "citation_trigger_probability": 0.78,
+                "estimate": True,
+                "source": "heuristic, not measured",
                 "recommended_content_length": "2500-4000 words",
                 "recommended_schema_types": ["TechArticle", "ScholarlyArticle"]
             },
             "chatgpt": {
                 "engine_type": "conversational_ai",
-                "citation_behavior": "Cites 2-4 sources in browsing mode, prefers well-structured authoritative content",
+                "citation_behavior": "(General industry guidance, unverified): Cites 2-4 sources in browsing mode, prefers well-structured authoritative content",
                 "content_preferences": [
                     "Clear, direct answers to specific questions",
                     "Step-by-step processes with numbered lists",
@@ -355,12 +479,14 @@ class GEOAEOSimulator:
                     "Content originality and unique insights"
                 ],
                 "citation_trigger_probability": 0.65,
+                "estimate": True,
+                "source": "heuristic, not measured",
                 "recommended_content_length": "1500-3000 words",
                 "recommended_schema_types": ["TechArticle", "Article"]
             },
             "gemini": {
                 "engine_type": "multimodal_ai",
-                "citation_behavior": "Cites 3-6 sources, integrates Knowledge Graph data with web results",
+                "citation_behavior": "(General industry guidance, unverified): Cites 3-6 sources, integrates Knowledge Graph data with web results",
                 "content_preferences": [
                     "Visual content descriptions and alt text",
                     "Structured data and Knowledge Graph alignment",
@@ -382,12 +508,14 @@ class GEOAEOSimulator:
                     "Author and publisher entity verification"
                 ],
                 "citation_trigger_probability": 0.72,
+                "estimate": True,
+                "source": "heuristic, not measured",
                 "recommended_content_length": "2000-3500 words",
                 "recommended_schema_types": ["TechArticle", "VideoObject", "ImageObject"]
             },
             "copilot": {
                 "engine_type": "integrated_ai",
-                "citation_behavior": "Cites 3-5 sources, integrates Bing index with GPT responses",
+                "citation_behavior": "(General industry guidance, unverified): Cites 3-5 sources, integrates Bing index with GPT responses",
                 "content_preferences": [
                     "Microsoft ecosystem integration signals",
                     "LinkedIn author profiles and credentials",
@@ -409,6 +537,8 @@ class GEOAEOSimulator:
                     "Structured data implementation"
                 ],
                 "citation_trigger_probability": 0.58,
+                "estimate": True,
+                "source": "heuristic, not measured",
                 "recommended_content_length": "2000-3000 words",
                 "recommended_schema_types": ["TechArticle", "Organization"]
             }
@@ -429,7 +559,9 @@ class GEOAEOSimulator:
                 ],
                 "citation_weight": "VERY_HIGH",
                 "required_for": ["perplexity", "google_ai_overview"],
-                "estimated_citation_probability": 0.85
+                "estimated_citation_probability": 0.85,
+                "estimate": True,
+                "source": "heuristic, not measured"
             },
             "tier_2_industry": {
                 "description": "Industry-recognized sources with strong domain authority",
@@ -442,7 +574,9 @@ class GEOAEOSimulator:
                 ],
                 "citation_weight": "HIGH",
                 "required_for": ["chatgpt", "gemini", "copilot"],
-                "estimated_citation_probability": 0.70
+                "estimated_citation_probability": 0.70,
+                "estimate": True,
+                "source": "heuristic, not measured"
             },
             "tier_3_brand": {
                 "description": "Brand-owned and expert-authored content",
@@ -455,7 +589,9 @@ class GEOAEOSimulator:
                 ],
                 "citation_weight": "MODERATE",
                 "required_for": ["copilot", "chatgpt"],
-                "estimated_citation_probability": 0.55
+                "estimated_citation_probability": 0.55,
+                "estimate": True,
+                "source": "heuristic, not measured"
             },
             "tier_4_community": {
                 "description": "Community and user-generated content sources",
@@ -468,7 +604,9 @@ class GEOAEOSimulator:
                 ],
                 "citation_weight": "LOW_TO_MODERATE",
                 "required_for": ["perplexity", "chatgpt"],
-                "estimated_citation_probability": 0.40
+                "estimated_citation_probability": 0.40,
+                "estimate": True,
+                "source": "heuristic, not measured"
             }
         }
         competitor_sources = self._extract_competitor_sources(competitor_content)
@@ -521,42 +659,56 @@ class GEOAEOSimulator:
                 "pattern": r'^[A-Z][^.]+ is a [^.]+\.$',
                 "description": "Single-sentence definition at paragraph start",
                 "citation_probability": 0.80,
+                "estimate": True,
+                "source": "heuristic, not measured",
                 "optimal_position": "first_paragraph"
             },
             "statistical_claim": {
                 "pattern": r'(?:\d+(?:\.\d+)?%|\$\d+[\d,.]*)\s+of\s+[^.]+\s+(?:are|is|have|has|report|indicate)',
                 "description": "Specific statistic with attribution",
                 "citation_probability": 0.85,
+                "estimate": True,
+                "source": "heuristic, not measured",
                 "optimal_position": "body_section"
             },
             "expert_quote_block": {
                 "pattern": r'"[^"]{20,}"\s*[-—]\s*[A-Z][a-z]+\s+[A-Z][a-z]+',
                 "description": "Named expert quote with credentials",
                 "citation_probability": 0.75,
+                "estimate": True,
+                "source": "heuristic, not measured",
                 "optimal_position": "body_section"
             },
             "comparison_statement": {
                 "pattern": r'[A-Z][^.]+ (?:is|are) (?:more|less|faster|slower|better|worse|cheaper|more expensive) than [A-Z][^.]+\.',
                 "description": "Direct comparison with clear winner",
                 "citation_probability": 0.70,
+                "estimate": True,
+                "source": "heuristic, not measured",
                 "optimal_position": "comparison_section"
             },
             "step_by_step": {
                 "pattern": r'(?:Step \d|^\d+[\.\)]\s)',
                 "description": "Numbered step-by-step process",
                 "citation_probability": 0.65,
+                "estimate": True,
+                "source": "heuristic, not measured",
                 "optimal_position": "how_to_section"
             },
             "data_table_reference": {
                 "pattern": r'(?:as shown in the table|the following data|the comparison below)',
                 "description": "Reference to structured data",
                 "citation_probability": 0.60,
+                "estimate": True,
+                "source": "heuristic, not measured",
                 "optimal_position": "data_section"
             },
             "list_with_metrics": {
                 "pattern": r'(?:top|best|leading)\s+\d+\s+[^.]+(?:by|with|at)\s+\d+',
                 "description": "List with specific metrics",
                 "citation_probability": 0.72,
+                "estimate": True,
+                "source": "heuristic, not measured",
                 "optimal_position": "list_section"
             }
         }
@@ -667,10 +819,11 @@ class GEOAEOSimulator:
                 "freshness_signal": "Reference current year data and recent developments"
             },
             "estimated_improvement": {
-                "ai_overview_citation_probability": "+25-40%",
-                "perplexity_citation_probability": "+20-35%",
-                "chatgpt_citation_probability": "+15-25%",
-                "overall_visibility_improvement": "+30-50%"
+                "note": "General industry guidance - unverified heuristic estimate, not measured data for this page",
+                "ai_overview_citation_probability": "(General industry guidance, unverified): +25-40%",
+                "perplexity_citation_probability": "(General industry guidance, unverified): +20-35%",
+                "chatgpt_citation_probability": "(General industry guidance, unverified): +15-25%",
+                "overall_visibility_improvement": "(General industry guidance, unverified): +30-50%"
             }
         }
 
@@ -811,49 +964,54 @@ class GEOAEOSimulator:
         return {
             "engine_optimization_insights": {
                 "primary_target": "google_ai_overview",
-                "citation_probability_range": "58%-85% across engines",
-                "benchmark": "Google AI Overview cites 3-5 sources; Perplexity cites 5-10; ChatGPT cites 2-4 in browsing mode",
+                "citation_probability_range": "(General industry guidance, unverified): 58%-85% across engines",
+                "benchmark": "(General industry guidance, unverified): Google AI Overview cites 3-5 sources; Perplexity cites 5-10; ChatGPT cites 2-4 in browsing mode",
                 "statistical_range": f"Average citation trigger probability: {answer_triggers.get('avg_citation_probability', 0):.1%}",
                 "expert_recommendation": "Prioritize Google AI Overview (85% citation probability) and Perplexity (78%) for maximum generative visibility",
                 "common_mistakes": ["Optimizing only for Google and ignoring Perplexity", "Writing without inline citations", "Skipping direct answer blocks"],
-                "success_metrics": ["AI Overview citation within 60 days", "Perplexity citation rate > 30%", "Cross-engine visibility > 2 engines"]
+                "success_metrics": ["AI Overview citation within 60 days", "Perplexity citation rate > 30%", "Cross-engine visibility > 2 engines"],
+                "data_origin": "unverified_industry_heuristic - not measured for this page"
             },
             "citation_sources_insights": {
                 "total_requirements": citation_sources.get("total_source_requirements", 0),
                 "diversity_score": citation_sources.get("citation_diversity_score", 0),
-                "benchmark": "Top GEO-optimized pages cite 8-12 sources across 4 tiers; Tier 1 sources are required for Perplexity and Google AI Overview",
-                "statistical_range": f"Citation diversity: {citation_sources.get('citation_diversity_score', 0)*100:.0f}% (target: 75%+)",
+                "benchmark": "(General industry guidance, unverified): Top GEO-optimized pages cite 8-12 sources across 4 tiers; Tier 1 sources are required for Perplexity and Google AI Overview",
+                "statistical_range": f"Citation diversity: {citation_sources.get('citation_diversity_score', 0)*100:.0f}% (unverified heuristic target: 75%+)",
                 "expert_recommendation": "Secure at least 2 Tier 1 (academic/government) and 3 Tier 2 (industry) sources for maximum citation probability",
                 "common_mistakes": ["Relying solely on brand-owned sources", "Missing primary research citations", "Citing secondary reporting instead of primary sources"],
-                "success_metrics": ["Citation diversity > 75%", "3+ Tier 1 sources cited", "Perplexity citation for 2+ queries"]
+                "success_metrics": ["Citation diversity > 75%", "3+ Tier 1 sources cited", "Perplexity citation for 2+ queries"],
+                "data_origin": "unverified_industry_heuristic - not measured for this page"
             },
             "answer_triggers_insights": {
                 "total_trigger_types": answer_triggers.get("total_trigger_types", 0),
                 "high_probability_count": len(answer_triggers.get("high_probability_triggers", [])),
                 "missing_triggers": answer_triggers.get("missing_triggers", []),
-                "benchmark": "Pages with 5+ answer trigger types have 60% higher citation probability across all engines",
-                "statistical_range": f"Trigger types implemented: {answer_triggers.get('total_trigger_types', 0)}/7 (target: 5+)",
+                "benchmark": "(General industry guidance, unverified): Pages with 5+ answer trigger types have 60% higher citation probability across all engines",
+                "statistical_range": f"Trigger types implemented: {answer_triggers.get('total_trigger_types', 0)}/7 (unverified heuristic target: 5+)",
                 "expert_recommendation": "Implement direct_definition, statistical_claim, and expert_quote_block triggers as they have >75% citation probability",
                 "common_mistakes": ["Writing without statistical claims", "Missing expert attribution", "Avoiding direct comparison statements"],
-                "success_metrics": ["5+ trigger types implemented", "Citation probability > 70%", "AI Overview extraction for definitional queries"]
+                "success_metrics": ["5+ trigger types implemented", "Citation probability > 70%", "AI Overview extraction for definitional queries"],
+                "data_origin": "unverified_industry_heuristic - not measured for this page"
             },
             "geo_readiness_insights": {
                 "overall_score": geo_readiness.get("overall_geo_readiness", 0),
                 "readiness_tier": geo_readiness.get("readiness_tier", "UNKNOWN"),
                 "direct_answer_blocks": geo_readiness.get("direct_answer_blocks_found", 0),
-                "benchmark": "GEO-ready content averages 5+ direct answer blocks, 3+ statistics, and 3+ source attributions per article",
-                "statistical_range": f"Current readiness: {geo_readiness.get('overall_geo_readiness', 0)*100:.0f}% (target: 70%+)",
+                "benchmark": "(General industry guidance, unverified): GEO-ready content averages 5+ direct answer blocks, 3+ statistics, and 3+ source attributions per article",
+                "statistical_range": f"Current readiness: {geo_readiness.get('overall_geo_readiness', 0)*100:.0f}% (unverified heuristic target: 70%+)",
                 "expert_recommendation": "Add at least 5 direct answer blocks (40-60 words each) and 3+ statistics with source attribution",
                 "common_mistakes": ["Insufficient direct answer blocks (need 5+)", "Missing verifiable statistics", "No source attributions for claims"],
-                "success_metrics": ["GEO readiness score > 70%", "5+ direct answer blocks", "3+ sourced statistics", "Citation from 2+ generative engines"]
+                "success_metrics": ["GEO readiness score > 70%", "5+ direct answer blocks", "3+ sourced statistics", "Citation from 2+ generative engines"],
+                "data_origin": "unverified_industry_heuristic - not measured for this page"
             },
             "citation_gap_insights": {
                 "total_gaps": citation_gap_analysis.get("total_gaps", 0),
                 "high_priority_gaps": citation_gap_analysis.get("high_priority_gaps", 0),
-                "benchmark": "Competitive pages cite sources from 3+ of the 4 citation tiers; missing tier 1 sources reduce Perplexity citation by 40%",
+                "benchmark": "(General industry guidance, unverified): Competitive pages cite sources from 3+ of the 4 citation tiers; missing tier 1 sources reduce Perplexity citation by 40%",
                 "statistical_range": f"Citation source gaps: {citation_gap_analysis.get('total_gaps', 0)} missing source types identified",
                 "expert_recommendation": "Close Tier 1 gaps first (government, academic, standards bodies) as they have highest citation weight",
                 "common_mistakes": ["Ignoring Tier 1 authoritative sources", "Only citing industry publications", "Missing official documentation links"],
-                "success_metrics": ["Citation gaps < 5", "Tier 1 sources secured", "Source coverage across 3+ tiers"]
+                "success_metrics": ["Citation gaps < 5", "Tier 1 sources secured", "Source coverage across 3+ tiers"],
+                "data_origin": "unverified_industry_heuristic - not measured for this page"
             }
         }

@@ -9,6 +9,8 @@
 [![Flask](https://img.shields.io/badge/Flask-3.0-000000?style=for-the-badge&logo=flask&logoColor=white)](https://flask.palletsprojects.com/)
 [![ReportLab](https://img.shields.io/badge/ReportLab-4.2-E1462C?style=for-the-badge&logo=adobe&logoColor=white)](https://www.reportlab.com/)
 [![SMTP](https://img.shields.io/badge/SMTP-OTP%20Verified-00897B?style=for-the-badge&logo=gmail&logoColor=white)](https://en.wikipedia.org/wiki/Simple_Mail_Transfer_Protocol)
+[![Version](https://img.shields.io/badge/Version-v2.1.0--enterprise-6d4ff0?style=for-the-badge)](https://github.com/dipakjad1993/Full-Time-Content-Assistant-2026)
+[![Tests](https://img.shields.io/badge/Tests-13%2F13%20pytest%20passing-059669?style=for-the-badge)](https://docs.pytest.org/)
 [![Platform](https://img.shields.io/badge/Platform-Windows%20%7C%20macOS%20%7C%20Linux-0078D6?style=for-the-badge&logo=windows&logoColor=white)](https://www.python.org/)
 [![License](https://img.shields.io/badge/License-MIT-green?style=for-the-badge)](LICENSE)
 [![GitHub Repo](https://img.shields.io/badge/GitHub-dipakjad1993%2FFull--Time--Content--Assistant--2026-181717?style=for-the-badge&logo=github&logoColor=white)](https://github.com/dipakjad1993/Full-Time-Content-Assistant-2026)
@@ -17,45 +19,64 @@
 
 > **"Rank on Google. Get cited by ChatGPT. Be the answer everywhere."**
 >
-> A production-grade, self-hosted web application that deep-analyzes your content — or any published URL — across **21 specialized modules**, assembles the findings into **5 actionable blueprints** plus an executive summary, and lets you **download the full report as a polished PDF** or **email it to a verified inbox protected by a one-time-password verification layer**.
+> A production-grade, self-hosted web application that deep-analyzes your content — or any published URL — across **21 specialized modules**, assembles the findings into **5 actionable blueprints** plus an executive summary, and lets you **download the full report as a polished PDF**, **share it via versioned links**, or **email it to a verified inbox protected by a one-time-password verification layer**.
+>
+> **v2.1.0-enterprise** hardens the platform end-to-end: SSRF-guarded fetching, `secrets`-based OTPs, rate-limited APIs, XSS-escaped rendering, parallel module execution, a pluggable SERP-provider layer (Serper / DataForSEO / DDG fallback) with 30-day caching, a dual SEO+GEO content scorer, a SERP-driven brief generator, GSC Quick-Wins from CSV upload, AI-crawler (retrieval-bot) audits, and honestly-labeled heuristic estimates everywhere a number isn't measured.
 
 </div>
+
+---
+
+## 🆕 What's New in v2.1.0-enterprise
+
+| Area | What changed |
+|---|---|
+| Security | OTP via `secrets.randbelow`, SSRF allowlist + DNS + redirect/size caps, per-IP rate limits, CSP/HSTS/`nosniff`/`SAMEORIGIN` headers, tracebacks never leak to clients (`APP_DEBUG` gates them), thread-safe PDF builder (global `story_width` removed), localhost-by-default binding |
+| Correctness | Single M19 (URL-aware `LocalizationSyncEngine`); M02/M10/M14/M17 carry `method_note: heuristic estimate`; every module result enforces the `ModuleResult` contract (`module`, `module_name`, `status`) |
+| Scale | M04–M21 run in an 8-worker thread pool; related-query SERP fan-out parallelized; UA rotation + backoff; SERP-provider abstraction with SQLite 30-day cache |
+| New APIs | `/api/score` (dual SEO+GEO content score), `/api/brief` (SERP-driven brief), `/api/gsc_quick_wins` (CSV → striking distance / decay / cannibalization / AI-appearance), `/api/share` (versioned share links), `/api/health` |
+| Intelligence | AI-crawler audit on M18 (retrieval vs training bots + `llms.txt` hygiene note) and cited 2026 AI-Search context (`enterprise_intelligence`) with `live_measurement` vs `cited_research` tagging |
+| Tests | `test_api.py` is now a real **pytest** suite (13 tests, mocked network, asserts on contract/security/scorer/GSC/M19) |
+
+---
 
 ---
 
 ## 📖 Table of Contents
 
 1. [Real Screenshots of the Tool Working](#-real-screenshots-of-the-tool-working)
-2. [Introduction — Why This Tool Exists](#-introduction--why-this-tool-exists)
-3. [The Problem It Solves](#-the-problem-it-solves)
-4. [Core Capabilities at a Glance](#-core-capabilities-at-a-glance)
-5. [The Two Analysis Modes](#-the-two-analysis-modes)
-6. [The 21 Analysis Modules (Deep Dive)](#-the-21-analysis-modules-deep-dive)
-7. [The 5 Blueprint Outputs](#-the-5-blueprint-outputs)
-8. [Export & Share — Download PDF + Email with OTP Verification](#-export--share--download-pdf--email-with-otp-verification)
-9. [Security & Anti-Abuse Model](#-security--anti-abuse-model)
-10. [Live Data Integrations](#-live-data-integrations)
-11. [Technology Stack](#-technology-stack)
-12. [Architecture & Data Flow](#-architecture--data-flow)
-13. [Project Structure](#-project-structure)
-14. [Installation & Setup](#-installation--setup)
-15. [SMTP / Email Configuration](#-smtp--email-configuration)
-16. [Complete Usage Walkthrough](#-complete-usage-walkthrough)
-17. [REST API Reference](#-rest-api-reference)
-18. [The PDF Report Generator](#-the-pdf-report-generator)
-19. [Real-Data Validation & Honesty](#-real-data-validation--honesty)
-20. [Testing](#-testing)
-21. [Troubleshooting](#-troubleshooting)
-22. [Frequently Asked Questions (FAQ)](#-frequently-asked-questions-faq)
-23. [Roadmap](#-roadmap)
-24. [Contributing](#-contributing)
-25. [License](#-license)
+2. [What's New in v2.1.0-enterprise](#-whats-new-in-v210-enterprise)
+3. [Introduction — Why This Tool Exists](#-introduction--why-this-tool-exists)
+4. [The Problem It Solves](#-the-problem-it-solves)
+5. [Core Capabilities at a Glance](#-core-capabilities-at-a-glance)
+6. [The Two Analysis Modes](#-the-two-analysis-modes)
+7. [The 21 Analysis Modules (Deep Dive)](#-the-21-analysis-modules-deep-dive)
+8. [The 5 Blueprint Outputs](#-the-5-blueprint-outputs)
+9. [Export & Share — Download PDF + Email with OTP Verification](#-export--share--download-pdf--email-with-otp-verification)
+10. [Security & Anti-Abuse Model](#-security--anti-abuse-model)
+11. [Live Data Integrations](#-live-data-integrations)
+12. [Technology Stack](#-technology-stack)
+13. [Architecture & Data Flow](#-architecture--data-flow)
+14. [Project Structure](#-project-structure)
+15. [Installation & Setup](#-installation--setup)
+16. [SMTP / Email Configuration](#-smtp--email-configuration)
+17. [Deployment (Localhost + Reverse Proxy)](#-deployment-localhost--reverse-proxy)
+18. [Complete Usage Walkthrough](#-complete-usage-walkthrough)
+19. [REST API Reference](#-rest-api-reference)
+20. [The PDF Report Generator](#-the-pdf-report-generator)
+21. [Real-Data Validation & Honesty](#-real-data-validation--honesty)
+22. [Testing](#-testing)
+23. [Troubleshooting](#-troubleshooting)
+24. [Frequently Asked Questions (FAQ)](#-frequently-asked-questions-faq)
+25. [Roadmap](#-roadmap)
+26. [Contributing](#-contributing)
+27. [License](#-license)
 
 ---
 
 ## 📸 Real Screenshots of the Tool Working
 
-> Every screenshot below was captured **live** from the running application, rendering **real analysis results** produced by the 21-module engine against live web data. Nothing is mocked or hard-coded.
+> Every screenshot below was captured **live** from the running application, rendering **real analysis results** produced by the 21-module engine against live web data (DuckDuckGo SERP, Wikidata, Wayback Machine, live HTTP fetches). No demo data is injected. Where the tool has no measured data it reports that honestly (e.g. `NO_CONTENT`, `NOT_CONFIGURED`, `not_detected`, `unverified_industry_heuristic` annotations) instead of fabricating results.
 
 ### 1. Landing Page — Welcome & Input Panel (Dark Theme)
 The main entry point: a sidebar with the two analysis modes (URL mode + Manual Input), and a feature overview explaining why the tool exists.
@@ -568,15 +589,21 @@ This guarantees **only verified mailboxes** ever receive a report, so nobody can
 
 | Control | Setting | Why |
 |---|---|---|
+| OTP generation | `secrets.randbelow(10**6)` (CSPRNG) | Mersenne Twister is not suitable for security tokens |
 | OTP validity | **10 minutes** | Short window prevents offline brute-force |
 | OTP usage | **Single-use** | Replay of a captured code is rejected |
 | Wrong attempts | **5 max per request** | Then the OTP is invalidated |
-| Send frequency | **Max 3 requests / email / 10 min** | Throttles mail bombing |
+| Send frequency | **Max 3 requests / email / 10 min** + per-IP rate limits (analyze 20/hr, PDF 10/hr, OTP 5/hr) | Throttles mail bombing + DoS amplification (each analysis fans out ~16 live fetches) |
+| SSRF guard | Scheme allowlist (http/https), private/link-local/metadata/`.local` denylist, DNS re-check, 3-redirect cap, 2MB cap | The server fetches user-supplied URLs — it must never reach `169.254.x.x`, localhost, or intranet hosts |
+| Error responses | Generic messages; tracebacks only when `APP_DEBUG=true` | Full Python traces never leak to attackers |
+| XSS | All attacker-influenced interpolations escaped (`esc()`); `showTab` no longer relies on the global `event` object | A malicious URL/competitor heading can't pwn other viewers |
+| Security headers | CSP, `X-Frame-Options: SAMEORIGIN`, `nosniff`, `Referrer-Policy`, HSTS on HTTPS | Baseline browser hardening on every response |
+| PDF builder | No shared globals (thread-local-safe widths) | Safe under `threaded=True` |
 | Email validation | Strict regex on the **server** | Blocks malformed/garbage inputs |
 | OTP storage | **In-memory only** | Never logged, never persisted to disk |
 | Credentials | `mail_config.json` (**git-ignored**) or env vars | Secrets never committed |
 | Report generation | Happens **only after** successful OTP verification | No PDF is generated for unverified requests |
-| Download endpoint | Unauthenticated by design | Serves the local user running the tool; the *email* path is the OTP-protected one |
+| Bind address | **`127.0.0.1` by default** (`HOST`/`PORT` env override) | Never expose the Flask dev server; use gunicorn/waitress + nginx (see Deployment) |
 
 ---
 
@@ -586,14 +613,16 @@ The engine performs **real network requests** at analysis time:
 
 | Integration | What It Provides | Module(s) |
 |---|---|---|
+| SERP provider layer (`SERP_PROVIDER=serper\|dataforseo\|ddg_fallback`, SQLite 30-day cache) | Paid Google SERP APIs when keys are set; DDG/Wikipedia fallback otherwise — raw top-10 parsed signals cached, never fabricated | M01, M09 + Brief Generator |
 | DuckDuckGo HTML SERP | Real ranking results, titles, URLs, snippets, People-Also-Ask | M01 |
 | Wikidata API | Real entity Q-IDs for Knowledge-Graph matching | M01 |
 | Wayback Machine CDX API | Historical snapshots for freshness/decay analysis (with retry + backoff) | M15 |
 | HTTP requests | Page status codes, robots.txt rules, sitemap detection, readiness | M18 |
+| AI-crawler audit | Live robots.txt vs retrieval bots (`OAI-SearchBot`, `ChatGPT-User`, `PerplexityBot`, `Claude-SearchBot`, `Applebot-Extended`) + `/llms.txt` hygiene check | M18 |
 | Server response headers | Server technology + CDN provider detection (case-insensitive; honest `not_detected` fallback) | M16 |
 | Link reachability | Live health checks for citation/internal URLs | M05, M07 |
 
-All network calls include sensible timeouts, retries with backoff, and graceful fallbacks — a slow or blocking third-party service never hangs the whole analysis.
+All network calls include sensible timeouts, UA rotation, retries with backoff, and graceful fallbacks — a slow or blocking third-party service never hangs the whole analysis. M04–M21 execute in an 8-worker thread pool, so one slow source can't serialize the entire run.
 
 ---
 
@@ -602,12 +631,14 @@ All network calls include sensible timeouts, retries with backoff, and graceful 
 | Layer | Technology |
 |---|---|
 | Language | Python 3.13 |
-| Web framework | Flask 3 (dev server, threaded) |
+| Web framework | Flask 3 (threaded; localhost by default — gunicorn/waitress + nginx for prod) |
 | PDF generation | ReportLab 4 (Segoe UI fonts, styled tables, page numbers, proper breaks) |
-| HTTP / live data | `requests` + standard library (`urllib`) |
+| HTTP / live data | `requests` + standard library (`urllib`); SERP via Serper / DataForSEO / DDG fallback (`SERP_PROVIDER`) |
+| Scoring / briefs / GSC | Stdlib-only `content_scorer.py` (TF-IDF dual SEO+GEO), `brief_generator.py`, `gsc_quickwins.py` — no ML dependencies |
 | Email | Standard library `smtplib` / `email` (SMTP with STARTTLS) |
 | Front end | Vanilla JS + CSS (zero build step) — Google Sans (Pixel) font, dark/light themes |
 | HTML parsing | `html.parser` (no heavy dependencies) |
+| Tests | `pytest` (13 tests, fully mocked network) |
 
 ---
 
@@ -619,10 +650,14 @@ All network calls include sensible timeouts, retries with backoff, and graceful 
 │  sidebar inputs │ tabs │ export card  │
 └──────────────┬────────────────────────┘
                │ POST /api/analyze | /api/analyze-url
+               │      /api/score | /api/brief | /api/gsc_quick_wins
 ┌──────────────▼────────────────────────┐
 │        PlatformEngine                 │  core/engine.py
 │        run_analysis(InputFramework)   │
-│        -> orchestrates 21 modules     │
+│  M01→M02→M03 chain, then M04–M21 in   │
+│  ThreadPoolExecutor(8); every result  │
+│  normalized to the ModuleResult       │
+│  contract + heuristic labels          │
 └──────────────┬────────────────────────┘
                │
 ┌──────────────▼────────────────────────┐
@@ -634,6 +669,8 @@ All network calls include sensible timeouts, retries with backoff, and graceful 
 │  21 Modules (modules/module_01_*.py … module_21_*.py) │
 │  + utils/web_data.py  (live SERP, Wikidata, Wayback,   │
 │     robots.txt, headers, CDN detection, link health)   │
+│  + utils/serp_provider.py (Serper/DataForSEO/DDG +     │
+│     30-day SQLite cache) + utils/security.py (SSRF)    │
 └──────────────┬─────────────────────────────────────────┘
                │
 ┌──────────────▼────────────────────────┐
@@ -643,19 +680,20 @@ All network calls include sensible timeouts, retries with backoff, and graceful 
                │
 ┌──────────────▼─────────────────────────────────────────────┐
 │  Server layer (server.py)                                 │
-│  PDF builder (reportlab)   │  SMTP + in-memory OTP store  │
-│  /api/download_pdf         │  /api/send_otp              │
-│  /api/verify_and_send_report │  /api/analyze / analyze-url │
+│  PDF builder (reportlab, thread-safe) │ in-memory OTP store│
+│  /api/download_pdf  /api/share        │  /api/send_otp     │
+│  /api/verify_and_send_report │ /api/analyze / analyze-url  │
+│  + CSP/HSTS/security headers on every response            │
 └───────────────────────────────────────────────────────────┘
 ```
 
 **End-to-end flow:**
-1. Browser submits inputs (or a URL) to the Flask API.
+1. Browser submits inputs (or a URL) to the Flask API (rate-limited, SSRF-guarded, size-capped).
 2. `PlatformEngine` builds a validated `InputFramework`.
-3. All 21 modules run — many pulling **live web data**.
+3. M01→M02→M03 run in sequence (real dependencies); **M04–M21 run in parallel** — many pulling **live web data** via the cached SERP-provider layer.
 4. `OutputPipeline` compiles results into 5 blueprints + executive summary (derived from actual module health — no fabricated counts).
-5. Results return as JSON; the browser renders tabs, stat boxes, tables and issue highlighting.
-6. The user can download the PDF (server renders via ReportLab) or send it through the OTP-verified email flow.
+5. Results return as JSON; the browser renders tabs, stat boxes, tables and issue highlighting (all interpolations escaped).
+6. The user can download the PDF (server renders via ReportLab), share via versioned `/api/share` links, generate a `/api/brief`, score drafts via `/api/score`, upload GSC CSVs via `/api/gsc_quick_wins`, or send the PDF through the OTP-verified email flow.
 
 ---
 
@@ -663,15 +701,15 @@ All network calls include sensible timeouts, retries with backoff, and graceful 
 
 ```
 Full-Time-Content-Assistant-2026/
-├── server.py                        # Flask app: UI, API, PDF builder, OTP + email endpoints
-├── requirements.txt                 # Python dependencies
+├── server.py                        # Flask app: UI, API, PDF builder, OTP + email, score/brief/GSC/share endpoints
+├── requirements.txt                 # Flask, ReportLab, Requests, pytest (+ gunicorn/waitress notes)
 ├── mail_config.example.json         # SMTP config template (commit this)
 ├── mail_config.json                 # REAL SMTP credentials — GIT-IGNORED (copy from example)
 ├── .gitignore                       # Excludes caches, logs, secrets, test output
 ├── README.md                        # This documentation
 ├── screenshots/                     # Real tool screenshots used above
 │   ├── 01-landing-dark.png  …  14-url-analysis.png
-├── test_api.py                      # API smoke tests
+├── test_api.py                      # pytest suite (13 tests, mocked network, contract + security asserts)
 └── intent_entity_platform/
     ├── __init__.py
     ├── __main__.py
@@ -680,12 +718,14 @@ Full-Time-Content-Assistant-2026/
     │   └── platform_config.json     # Platform configuration
     ├── core/
     │   ├── __init__.py
-    │   ├── engine.py                # PlatformEngine orchestration
+    │   ├── engine.py                # PlatformEngine: M01–M03 chain + M04–M21 thread pool, ModuleResult contract
     │   ├── input_framework.py       # Typed, validated inputs
-    │   └── output_pipeline.py       # Blueprints + executive summary
+    │   ├── output_pipeline.py       # Blueprints + executive summary
+    │   ├── benchmarks.py            # Score benchmark targets
+    │   └── playbooks.py             # Per-module recommendation playbooks
     ├── modules/
     │   ├── module_01_serp_kg.py
-    │   ├── module_02_geo_aeo.py
+    │   ├── module_02_geo_aeo.py     # heuristic readiness (labeled, not a rank simulator)
     │   ├── module_03_semantic_structure.py
     │   ├── module_04_eeat_gap.py
     │   ├── module_05_internal_links.py
@@ -693,23 +733,29 @@ Full-Time-Content-Assistant-2026/
     │   ├── module_07_citation_verifier.py
     │   ├── module_08_multimodal_assets.py
     │   ├── module_09_geo_tracker.py
-    │   ├── module_10_csr_simulator.py
+    │   ├── module_10_csr_simulator.py  # heuristic bot-visible estimate (labeled)
     │   ├── module_11_rag_tester.py
     │   ├── module_12_brand_compliance.py
     │   ├── module_13_schema_generator.py
-    │   ├── module_14_intent_bounce.py
+    │   ├── module_14_intent_bounce.py  # heuristic bounce estimate (labeled)
     │   ├── module_15_content_decay.py
     │   ├── module_16_cdn_edge.py
-    │   ├── module_17_ab_testing.py
-    │   ├── module_18_indexing_sentinel.py
-    │   ├── module_19_localization.py
-    │   ├── module_19_localization_sync.py
+    │   ├── module_17_ab_testing.py     # real power math, assumed inputs (labeled)
+    │   ├── module_18_indexing_sentinel.py  # + AI-crawler audit via engine
+    │   ├── module_19_localization_sync.py  # the single wired M19 (URL-aware, hreflang)
     │   ├── module_20_digital_pr.py
     │   └── module_21_dom_inspector.py
+    ├── data/
+    │   └── serp_cache.sqlite3       # 30-day SERP cache (auto-created, git-ignored pattern)
     └── utils/
         ├── __init__.py
         ├── text_analytics.py        # Text metrics & analysis helpers
-        └── web_data.py              # Live SERP, Wikidata, Wayback, robots, headers, links
+        ├── web_data.py              # Live SERP, Wikidata, Wayback, robots, headers, links (UA rotation + backoff)
+        ├── security.py              # SSRF guard, safe_fetch, rate limiting, validation
+        ├── serp_provider.py         # Serper/DataForSEO/DDG abstraction + cache
+        ├── content_scorer.py        # Dual SEO+GEO TF-IDF scorer (`/api/score`)
+        ├── brief_generator.py       # SERP-driven briefs (`/api/brief`)
+        └── gsc_quickwins.py         # GSC CSV → quick wins (`/api/gsc_quick_wins`)
 ```
 
 ---
@@ -741,7 +787,17 @@ python -m venv .venv
 ```bash
 pip install -r requirements.txt
 ```
-*(Installs Flask, ReportLab, and Requests.)*
+*(Installs Flask, ReportLab, Requests, and pytest for the test suite.)*
+
+### 4. (Optional) Configure a paid SERP provider
+By default the tool uses free fallback sources. For production-grade Google SERP data:
+```bash
+set SERP_PROVIDER=serper              # Windows  (or dataforseo)
+set SERPER_API_KEY=your-key
+# export SERP_PROVIDER=serper         # macOS / Linux
+# export SERPER_API_KEY=your-key
+```
+Results are cached for 30 days in `intent_entity_platform/data/serp_cache.sqlite3`.
 
 ### 4. Run the tool
 ```bash
@@ -795,6 +851,22 @@ Without SMTP configured, the tool still works fully — **Download PDF** works; 
 
 ---
 
+## 🚀 Deployment (Localhost + Reverse Proxy)
+
+`python server.py` binds **`127.0.0.1:5000`** by design (`HOST`/`PORT` env vars override). **Never expose the Flask dev server to a network.** For LAN/production:
+
+1. Serve with a real WSGI server — `gunicorn` (Linux) or `waitress` (Windows):
+   ```bash
+   # Linux
+   gunicorn server:app --workers 4 --bind 127.0.0.1:5000
+   # Windows
+   waitress-serve --listen=127.0.0.1:5000 server:app
+   ```
+2. Put **nginx** (or equivalent) in front for TLS termination, HSTS, compression, and edge rate-limiting on `/api/analyze`, `/api/analyze-url`, and `/api/download_pdf` (each analysis fans out ~16 live fetches — treat it as an expensive endpoint).
+3. Keep `APP_DEBUG` unset/`false` so 500 responses never include tracebacks.
+
+---
+
 ## 🧪 Complete Usage Walkthrough
 
 ### Step 1 — Start the tool
@@ -834,11 +906,17 @@ Click the theme toggle (top-right) to flip dark ↔ light *(screenshots 2 & 3)*.
 
 | Method | Endpoint | Body | Returns |
 |---|---|---|---|
-| `GET` | `/` | — | The web UI (HTML) |
-| `POST` | `/api/analyze` | `{seed, entity, brand?, website?, locale?, device?, funnel?, knowledge?, voice?, secondary?, blacklist?, sme?}` | Full analysis JSON |
-| `POST` | `/api/analyze-url` | `{url, brand?, locale?, device?}` | Full analysis JSON + `_url_data` |
-| `POST` | `/api/download_pdf` | `{report: <analysis JSON>}` | `application/pdf` attachment |
-| `POST` | `/api/send_otp` | `{email}` | `{ok, message}` or `{error}` |
+| `GET` | `/` | — | The web UI (HTML, cached 60s) |
+| `GET` | `/api/health` | — | `{ok, version, serp_provider, time}` |
+| `POST` | `/api/analyze` | `{seed, entity, brand?, website?, locale?, device?, funnel?, knowledge?, voice?, secondary?, blacklist?, sme?}` | Full analysis JSON (rate-limited 20/hr/IP) |
+| `POST` | `/api/analyze-url` | `{url, brand?, locale?, device?}` | Full analysis JSON + `_url_data` (SSRF-guarded, 20/hr/IP) |
+| `POST` | `/api/score` | `{draft, competitor_texts[]?, must_include_terms[]?, targets?}` | Dual SEO+GEO score 0–100 + grade (heuristic TF-IDF, labeled) |
+| `POST` | `/api/brief` | `{seed, entity, module_results?, competitive_intelligence?, word_target?}` | SERP-driven brief: intent, outline, FAQ, word/schema/E-E-A-T targets |
+| `POST` | `/api/gsc_quick_wins` | GSC CSV upload (`file`) or `{csv}` | Striking distance 4–20, decay, cannibalization, AI-appearance |
+| `POST` | `/api/share` | `{report, label?}` | `{share_id, share_url}` (versioned in-app sharing) |
+| `GET` | `/api/share/<id>` | — | Shared report JSON |
+| `POST` | `/api/download_pdf` | `{report: <analysis JSON>}` | `application/pdf` attachment (10/hr/IP, 5MB cap) |
+| `POST` | `/api/send_otp` | `{email}` | `{ok, message}` or `{error}` (5/hr/IP, CSPRNG code) |
 | `POST` | `/api/verify_and_send_report` | `{email, otp, report}` | `{ok, message}` or `{error}` |
 
 ### Example — run an analysis
@@ -854,6 +932,19 @@ curl -X POST http://localhost:5000/api/download_pdf \
   -H "Content-Type: application/json" \
   -d '{"report": {"entity":"test","module_results":{}}}' \
   --output report.pdf
+```
+
+### Example — score a draft (dual SEO+GEO)
+```bash
+curl -X POST http://localhost:5000/api/score \
+  -H "Content-Type: application/json" \
+  -d '{"draft":"...","competitor_texts":["..."],"must_include_terms":["pricing","vs"],"targets":{"words":1800}}'
+```
+
+### Example — GSC Quick Wins from a Performance CSV export
+```bash
+curl -X POST http://localhost:5000/api/gsc_quick_wins \
+  -F "file=@gsc-performance.csv"
 ```
 
 ### Example — OTP email flow
@@ -905,15 +996,19 @@ The platform is validated end-to-end against **live** targets. Example verificat
 - The executive summary's module-health counts are **derived from the actual results** — never hard-coded.
 - Text-dependent modules in keyword mode honestly return `No text provided` errors.
 - CDN detection reports `not_detected` (with `NOT_CONFIGURED` states) when no CDN can be confirmed from headers.
+- M02 (GEO), M10 (CSR/bot-visible), M14 (bounce), and M17 (A/B inputs) carry explicit `method_note: heuristic estimate` labels — formulas are real, unmeasured inputs are disclosed.
+- Enterprise context numbers are tagged `live_measurement` (computed this run) vs `cited_research` (2026 third-party studies, sourced inline) — cited stats are never presented as claims about your page.
 
 ---
 
 ## 🧫 Testing
 
-### API smoke tests
+### pytest suite (13 tests, mocked network — no live calls)
 ```bash
-python test_api.py
+python -m pytest test_api.py -q
 ```
+
+Covers: health, input validation (and no-traceback guarantee), mocked `/api/analyze` + `/api/analyze-url` happy paths, SSRF blocklist (`localhost`, `169.254.x.x`, private ranges, non-HTTP schemes), CSPRNG OTP + single-use flow, security headers, rate-limit 429s, scorer contract, GSC quick-wins, M19 Sync wiring, and the `ModuleResult` contract.
 
 ### Manual verification checklist
 1. `python server.py` → open http://localhost:5000 → HTTP 200.
@@ -933,9 +1028,11 @@ python test_api.py
 | "Could not send the OTP email" | Bad SMTP host/credentials | Verify host/port/App Password; check firewall |
 | Port 5000 already in use | Another process | Stop it, or change `port=5000` at the bottom of `server.py` |
 | Module returns an error | Live source rate-limited/unreachable | Retry the analysis or check internet connectivity |
-| URL fetch fails | Target blocks bots | Try another published URL; the tool sends a browser-like User-Agent |
+| URL fetch fails | Target blocks bots | Try another published URL; the tool sends a rotated browser-like User-Agent |
+| `URL blocked by SSRF guard` | Private/localhost/metadata/non-HTTP URL submitted | Analyze a public `http(s)` URL; intranet and cloud-metadata hosts are intentionally rejected |
+| `429 Rate limit exceeded` | Per-IP hourly quota hit | Wait for the window to reset; put edge rate-limiting on expensive endpoints in prod |
 | PDF won't download | Browser/network policy | Allow localhost downloads, or use another browser |
-| Slow analysis | Many live network calls | Expected on first run; retries add backoff time for flaky sources |
+| Slow analysis | Many live network calls | M04–M21 run in parallel and SERP results cache for 30 days, so repeat runs are much faster |
 
 ---
 
@@ -951,7 +1048,7 @@ A: No. All live data uses free, public endpoints (DuckDuckGo HTML, Wikidata, Way
 A: Yes — locale is configurable (en-US, en-GB, de-DE, fr-FR, ja-JP, en-AU, en-IN, es-ES, …).
 
 **Q: How is the OTP email feature protected from abuse?**
-A: Six-digit single-use codes, 10-minute expiry, max 5 verification attempts, max 3 requests per email per 10 minutes, strict server-side validation, and in-memory-only storage. Only a verified code can trigger the PDF email.
+A: CSPRNG six-digit single-use codes (`secrets` module), 10-minute expiry, max 5 verification attempts, max 3 requests per email per 10 minutes plus per-IP rate limits, strict server-side validation, SSRF-guarded fetching, and in-memory-only storage. Only a verified code can trigger the PDF email.
 
 **Q: Can I use the data programmatically?**
 A: Yes — the Raw JSON tab exposes the complete Blueprint and Module JSON, and the `/api/download_pdf` and `/api/analyze` endpoints are REST-callable.
@@ -959,8 +1056,14 @@ A: Yes — the Raw JSON tab exposes the complete Blueprint and Module JSON, and 
 **Q: Does it work offline?**
 A: Partially. Live-data modules need the internet; the rest still analyze locally provided content.
 
-**Q: Why two files for module 19 (localization)?**
-A: The codebase includes both `module_19_localization.py` and `module_19_localization_sync.py`; the engine uses them for localization + localization-sync analysis. Both are part of the platform.
+**Q: Which M19 localization module does the engine use?**
+A: Exactly one: `module_19_localization_sync.py` (`LocalizationSyncEngine`) — URL-aware, with hreflang analysis and honest `NO_URL_DATA` states when no page was fetched. The legacy file was removed in v2.1.0.
+
+**Q: Which SERP source does M01 use?**
+A: Configurable via `SERP_PROVIDER`: `serper` or `dataforseo` when API keys are set (recommended for production — DDG ≠ Google), with a free DDG/Wikipedia fallback and a 30-day SQLite cache. Check `/api/health` for the active provider.
+
+**Q: How do I deploy this beyond localhost?**
+A: Run `gunicorn`/`waitress` behind nginx with TLS (see Deployment above). Keep `APP_DEBUG` off, and rate-limit `/api/analyze`, `/api/analyze-url`, and `/api/download_pdf` at the edge.
 
 **Q: Where are my SMTP credentials stored?**
 A: In `mail_config.json`, which is git-ignored so it can never be accidentally committed.
@@ -969,6 +1072,10 @@ A: In `mail_config.json`, which is git-ignored so it can never be accidentally c
 
 ## 🗺 Roadmap
 
+**Shipped in v2.1.0-enterprise:** pluggable SERP providers + cache, dual SEO+GEO content score, SERP-driven briefs, GSC Quick-Wins (CSV), versioned share links, AI-crawler audits, pytest suite, full security hardening.
+
+- **GSC OAuth sync** (direct Performance API pull; CSV upload already works).
+- **Neural embeddings scorer** (MiniLM-class upgrade over the current TF-IDF heuristic).
 - **Scheduled / recurring analyses** with diff reports.
 - **Multi-URL batch analysis**.
 - **CSV export** of headline metrics.

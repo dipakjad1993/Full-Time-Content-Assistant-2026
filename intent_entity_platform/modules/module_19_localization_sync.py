@@ -80,6 +80,7 @@ class LocalizationSyncEngine:
             ],
             "detailed_analysis": {
                 "hreflang_benchmarks": {
+                    "data_origin": "unverified_industry_heuristic - not measured for this page",
                     "minimum_locales_for_hreflang": "2+ language versions required",
                     "x_default_importance": "Critical - specifies fallback for unmatched locales",
                     "self_referencing_hreflang": "Required - each page must reference itself",
@@ -87,6 +88,7 @@ class LocalizationSyncEngine:
                     "typical_hreflang_error_rate": "30-40% of implementations have errors on first deploy"
                 },
                 "localization_benchmarks": {
+                    "data_origin": "unverified_industry_heuristic - not measured for this page",
                     "translation_quality_threshold": "Native speaker review required for YMYL content",
                     "localized_title_optimization": "Translate AND optimize for local search behavior",
                     "currency_localization_impact": "Localized pricing increases conversion by 20-40%",
@@ -94,6 +96,7 @@ class LocalizationSyncEngine:
                     "rtl_language_support": "Required for Arabic, Hebrew, Farsi - affects entire layout"
                 },
                 "international_seo_benchmarks": {
+                    "data_origin": "unverified_industry_heuristic - not measured for this page",
                     "geo_targeting_accuracy": "CDN-based geo-detection is 95%+ accurate",
                     "hreflang_implementation_time": "2-4 weeks for first implementation, 1-2 days for updates",
                     "content_localization_cost": "30-50% of original content creation cost per locale",
@@ -116,9 +119,9 @@ class LocalizationSyncEngine:
                 ],
                 "success_metrics": [
                     "Track organic traffic per locale version (target: proportional to market size)",
-                    "Monitor hreflang errors in GSC International Targeting report (target: 0 errors)",
-                    "Measure conversion rate by locale (target: within 20% of primary locale)",
-                    "Track local keyword rankings per locale (target: top 10 for target terms)",
+                    "(General industry guidance, unverified): Monitor hreflang errors in GSC International Targeting report (target: 0 errors)",
+                    "(General industry guidance, unverified): Measure conversion rate by locale (target: within 20% of primary locale)",
+                    "(General industry guidance, unverified): Track local keyword rankings per locale (target: top 10 for target terms)",
                     "Monitor bounce rate by locale (target: consistent across all versions)"
                 ]
             }

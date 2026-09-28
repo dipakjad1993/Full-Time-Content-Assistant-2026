@@ -17,8 +17,8 @@ class FluffClicheDecoder:
         self.module_id = "M06"
         self.module_name = "Algorithmic Fluff & Cliche De-Coder"
 
-    def analyze(self, text: str, brand_blacklist: List[str] = None, url_data: Dict = None) -> Dict[str, Any]:
-        """Full fluff and cliché analysis pipeline."""
+    def analyze(self, text: str, brand_blacklist: List[str] = None, url_data: Dict = None, inputs: Dict = None) -> Dict[str, Any]:
+        """Full fluff and cliché analysis pipeline with REAL competitor comparison."""
         if not text.strip():
             return {"module": self.module_id, "module_name": self.module_name, "error": "No text provided"}
 
@@ -31,6 +31,13 @@ class FluffClicheDecoder:
         filler_words = self._detect_filler_words(text)
         readability = self._assess_readability_depth(text)
         overall_quality = self._calculate_overall_quality(ai_patterns, burstiness, trope_analysis, sentence_quality)
+        
+        # NEW: Compare against real competitor writing patterns
+        real_competitor_fluff_analysis = None
+        if inputs:
+            real_competitor_pages = inputs.get("real_competitor_pages", [])
+            real_readability_analysis = inputs.get("real_readability_analysis", {})
+            real_competitor_fluff_analysis = self._analyze_real_competitor_fluff(real_competitor_pages, real_readability_analysis, text)
 
         url_fluff_analysis = self._analyze_url_fluff(text, url_data) if url_data else None
 
@@ -50,7 +57,9 @@ class FluffClicheDecoder:
             "rewrite_recommendations": self._generate_rewrite_recommendations(ai_patterns, burstiness, trope_analysis),
             "implementation_steps": self._generate_implementation_steps(ai_patterns, trope_analysis, filler_words, burstiness, readability),
             "where_to_add": self._generate_where_to_add(trope_analysis, filler_words, sentence_quality),
-            "detailed_analysis": self._generate_detailed_analysis(ai_patterns, trope_analysis, filler_words, burstiness, readability, overall_quality)
+            "detailed_analysis": self._generate_detailed_analysis(ai_patterns, trope_analysis, filler_words, burstiness, readability, overall_quality),
+            "real_competitor_fluff_comparison": real_competitor_fluff_analysis,
+            "data_source": "real_time_competitor_analysis" if real_competitor_fluff_analysis else "heuristic_analysis"
         }
 
         if url_fluff_analysis:
@@ -58,6 +67,87 @@ class FluffClicheDecoder:
             result["detailed_analysis"]["url_fluff_insights"] = url_fluff_analysis
 
         return result
+
+    def _analyze_real_competitor_fluff(self, competitor_pages: List[Dict], readability_analysis: Dict, user_text: str) -> Dict[str, Any]:
+        """Compare user text quality against REAL competitor writing patterns."""
+        if not competitor_pages:
+            return {"error": "No competitor data available"}
+        
+        successful_pages = [p for p in competitor_pages if p.get("fetch_success")]
+        if not successful_pages:
+            return {"error": "No successful competitor fetches"}
+        
+        competitor_readability = []
+        competitor_burstiness = []
+        competitor_tropes = []
+        
+        for page in competitor_pages:
+            if not page.get("fetch_success"):
+                continue
+            page_text = page.get("page_text", "")
+            
+            # Analyze readability
+            words = page_text.split()
+            sentences = re.split(r'[.!?]+', page_text)
+            sentences = [s.strip() for s in sentences if s.strip()]
+            avg_sentence_len = len(words) / max(1, len(sentences))
+            
+            # Analyze burstiness (sentence length variance)
+            sentence_lengths = [len(s.split()) for s in sentences if s.strip()]
+            if sentence_lengths:
+                mean_len = sum(sentence_lengths) / len(sentence_lengths)
+                variance = sum((l - mean_len) ** 2 for l in sentence_lengths) / len(sentence_lengths)
+                burstiness_score = min(1.0, variance / 100)
+            else:
+                burstiness_score = 0
+            
+            # Count AI-like patterns in competitor text
+            ai_patterns_count = len(re.findall(r'(?:moreover|furthermore|additionally|consequently|nevertheless|however|therefore|thus|hence)', page_text, re.IGNORECASE))
+            trope_count = len(re.findall(r'(?:game-changer|cutting-edge|leverage|synergy|paradigm|innovative|transformative|revolutionary|disruptive)', page_text, re.IGNORECASE))
+            
+            competitor_readability.append({
+                "url": page.get("url", ""),
+                "position": page.get("position", 0),
+                "avg_sentence_length": round(avg_sentence_len, 1),
+                "word_count": len(words),
+                "sentence_count": len(sentences)
+            })
+            competitor_burstiness.append(burstiness_score)
+            competitor_tropes.append(trope_count)
+        
+        # Calculate benchmarks
+        avg_competitor_sentence_len = sum(r["avg_sentence_length"] for r in competitor_readability) / len(competitor_readability) if competitor_readability else 0
+        avg_competitor_burstiness = sum(competitor_burstiness) / len(competitor_burstiness) if competitor_burstiness else 0
+        avg_competitor_tropes = sum(competitor_tropes) / len(competitor_tropes) if competitor_tropes else 0
+        
+        # Analyze user text for comparison
+        user_words = user_text.split()
+        user_sentences = re.split(r'[.!?]+', user_text)
+        user_sentences = [s.strip() for s in user_sentences if s.strip()]
+        user_avg_sentence_len = len(user_words) / max(1, len(user_sentences))
+        user_trope_count = len(re.findall(r'(?:game-changer|cutting-edge|leverage|synergy|paradigm|innovative|transformative|revolutionary|disruptive)', user_text, re.IGNORECASE))
+        
+        return {
+            "competitors_analyzed": len(competitor_readability),
+            "competitor_benchmarks": {
+                "avg_sentence_length": round(avg_competitor_sentence_len, 1),
+                "avg_burstiness_score": round(avg_competitor_burstiness, 3),
+                "avg_trope_count": round(avg_competitor_tropes, 1)
+            },
+            "user_text_comparison": {
+                "user_avg_sentence_length": round(user_avg_sentence_len, 1),
+                "user_trope_count": user_trope_count,
+                "sentence_length_vs_competitors": round(user_avg_sentence_len - avg_competitor_sentence_len, 1),
+                "trope_usage_vs_competitors": round(user_trope_count - avg_competitor_tropes, 1)
+            },
+            "recommendations": [
+                f"Adjust sentence length to match competitor average of {avg_competitor_sentence_len:.1f} words" if abs(user_avg_sentence_len - avg_competitor_sentence_len) > 5 else "Sentence length is competitive",
+                f"Reduce trope usage (competitors average {avg_competitor_tropes:.1f}, you have {user_trope_count})" if user_trope_count > avg_competitor_tropes else "Trope usage is competitive",
+                f"Increase burstiness to match competitor average of {avg_competitor_burstiness:.3f}" if avg_competitor_burstiness > 0.3 else "Burstiness is adequate"
+            ],
+            "competitor_readability_details": competitor_readability,
+            "data_source": "live_competitor_page_analysis"
+        }
 
     def _analyze_url_fluff(self, text: str, url_data: Dict) -> Dict[str, Any]:
         """Deep analysis of actual URL content for fluff, clichés, and content quality."""
@@ -154,12 +244,12 @@ class FluffClicheDecoder:
             "total_words": total_words,
             "total_sentences": total_sentences,
             "avg_sentence_length": round(avg_sentence_length, 1),
-            "avg_sentence_length_benchmark": "Optimal: 15-20 words per sentence",
+            "avg_sentence_length_benchmark": "(General industry guidance, unverified): 15-20 words per sentence is a common target",
             "sentences_over_40_words": sentences_over_40_words,
             "sentences_under_5_words": sentences_under_5_words,
             "comma_heavy_sentences": comma_heavy_sentences,
             "passive_voice_count": passive_voice,
-            "passive_voice_benchmark": "Reduce to <5% of sentences",
+            "passive_voice_benchmark": "(General industry guidance, unverified): Reduce to <5% of sentences",
             "weak_intensifiers_count": len(weak_intensifiers),
             "weak_intensifier_examples": weak_intensifiers[:5],
             "hedge_words_count": len(hedge_words),
@@ -175,7 +265,7 @@ class FluffClicheDecoder:
             "vague_nouns_count": len(vague_nouns),
             "total_fluff_issues": total_issues,
             "issue_density_per_100_words": round(issue_density, 2),
-            "issue_density_benchmark": "Target: <2 issues per 100 words",
+            "issue_density_benchmark": "(General industry guidance, unverified): Target <2 issues per 100 words",
             "content_quality_tier": (
                 "EXCELLENT - Clean, professional writing" if issue_density < 1 else
                 "GOOD - Minor cleanup needed" if issue_density < 3 else
@@ -183,9 +273,9 @@ class FluffClicheDecoder:
                 "POOR - Significant rewriting required"
             ),
             "lexical_diversity": round(lexical_diversity, 3),
-            "lexical_diversity_benchmark": "Good content: 0.4-0.6 lexical diversity",
+            "lexical_diversity_benchmark": "(General industry guidance, unverified): 0.4-0.6 lexical diversity is typical of good content",
             "overused_words": [{"word": w, "count": c} for w, c in overused_words],
-            "overused_words_benchmark": "No word should appear >5% of total words",
+            "overused_words_benchmark": "(General industry guidance, unverified): No word should appear >5% of total words",
             "content_issues": content_issues,
             "content_issues_count": len(content_issues),
             "specific_recommendations": self._generate_fluff_url_recommendations(text, url_data)
@@ -738,61 +828,67 @@ class FluffClicheDecoder:
             "ai_pattern_insights": {
                 "ai_probability_score": ai_patterns.get("ai_probability_score", 0),
                 "total_flags": ai_patterns.get("total_flags", 0),
-                "benchmark": "Human-written content typically has AI probability <0.3; 0.5+ indicates likely AI generation patterns",
-                "statistical_range": f"AI probability: {ai_patterns.get('ai_probability_score', 0)*100:.0f}% (target: <30%)",
+                "benchmark": "(General industry guidance, unverified): Human-written content typically has AI probability <0.3; 0.5+ indicates likely AI generation patterns",
+                "statistical_range": f"AI probability: {ai_patterns.get('ai_probability_score', 0)*100:.0f}% (unverified heuristic target: <30%)",
                 "expert_recommendation": "Reduce AI probability below 30% by adding unique voice, specific examples, and personal experience",
                 "common_mistakes": ["Not addressing AI patterns before publishing", "Only removing surface-level patterns without structural changes", "Ignoring opening filler that signals AI generation"],
-                "success_metrics": ["AI probability < 30%", "No AI pattern flags in first paragraph", "Unique voice throughout content"]
+                "success_metrics": ["AI probability < 30%", "No AI pattern flags in first paragraph", "Unique voice throughout content"],
+                "data_origin": "unverified_industry_heuristic - not measured for this page"
             },
             "trope_analysis_insights": {
                 "total_trope_occurrences": trope_analysis.get("total_trope_occurrences", 0),
                 "trope_categories_found": trope_analysis.get("trope_categories_found", 0),
                 "cleanliness_grade": trope_analysis.get("cleanliness_grade", "UNKNOWN"),
                 "blacklist_violations": len(trope_analysis.get("blacklist_violations", [])),
-                "benchmark": "Professional content has 0-2 trope occurrences; 5+ indicates significant AI cliché usage",
+                "benchmark": "(General industry guidance, unverified): Professional content has 0-2 trope occurrences; 5+ indicates significant AI cliché usage",
                 "statistical_range": f"Trope occurrences: {trope_analysis.get('total_trope_occurrences', 0)} across {trope_analysis.get('trope_categories_found', 0)} categories",
                 "expert_recommendation": "Eliminate all blacklist violations first, then replace HIGH severity tropes with specific, factual language",
                 "common_mistakes": ["Not checking for blacklist violations before publishing", "Replacing one cliché with another", "Missing subtle AI patterns like 'furthermore' and 'moreover'"],
-                "success_metrics": ["Cleanliness grade A or B", "Zero blacklist violations", "<3 total trope occurrences"]
+                "success_metrics": ["Cleanliness grade A or B", "Zero blacklist violations", "<3 total trope occurrences"],
+                "data_origin": "unverified_industry_heuristic - not measured for this page"
             },
             "filler_word_insights": {
                 "total_filler_count": filler_words.get("total_filler_count", 0),
                 "filler_density_percentage": filler_words.get("filler_density_percentage", 0),
                 "filler_severity": filler_words.get("filler_severity", "UNKNOWN"),
-                "benchmark": "Professional content has <1% filler density; >3% significantly reduces readability and credibility",
-                "statistical_range": f"Filler density: {filler_words.get('filler_density_percentage', 0):.1f}% (target: <1%)",
+                "benchmark": "(General industry guidance, unverified): Professional content has <1% filler density; >3% significantly reduces readability and credibility",
+                "statistical_range": f"Filler density: {filler_words.get('filler_density_percentage', 0):.1f}% (unverified heuristic target: <1%)",
                 "expert_recommendation": "Remove all empty phrases and weak intensifiers - they add zero informational value",
                 "common_mistakes": ["Keeping 'it is important to note' and similar empty phrases", "Using 'just', 'simply', 'actually' as hedges", "Not removing filler from high-visibility positions"],
-                "success_metrics": ["Filler density < 1%", "Zero empty phrases", "Zero weak intensifiers in first 200 words"]
+                "success_metrics": ["Filler density < 1%", "Zero empty phrases", "Zero weak intensifiers in first 200 words"],
+                "data_origin": "unverified_industry_heuristic - not measured for this page"
             },
             "burstiness_insights": {
                 "burstiness_score": burstiness.get("burstiness_score", 0),
                 "uniformity_risk": burstiness.get("uniformity_risk", "unknown"),
-                "benchmark": "Natural writing has burstiness score 0.5-0.8; uniform sentence lengths (score <0.3) indicate AI patterns",
+                "benchmark": "(General industry guidance, unverified): Natural writing has burstiness score 0.5-0.8; uniform sentence lengths (score <0.3) indicate AI patterns",
                 "statistical_range": f"Burstiness: {burstiness.get('burstiness_score', 0):.2f} (uniformity risk: {burstiness.get('uniformity_risk', 'unknown')})",
                 "expert_recommendation": "Create varied rhythm by mixing 3-word sentences with 30-40 word sentences throughout the content",
                 "common_mistakes": ["Writing all sentences at similar length", "Not varying sentence structure between paragraphs", "Ignoring burstiness uniformity risk"],
-                "success_metrics": ["Burstiness score > 0.5", "Uniformity risk < moderate", "Sentence length range from 5 to 45 words"]
+                "success_metrics": ["Burstiness score > 0.5", "Uniformity risk < moderate", "Sentence length range from 5 to 45 words"],
+                "data_origin": "unverified_industry_heuristic - not measured for this page"
             },
             "readability_insights": {
                 "flesch_kincaid_grade": readability.get("flesch_kincaid_grade", 0),
                 "readability_tier": readability.get("readability_tier", "UNKNOWN"),
                 "depth_tier": readability.get("depth_tier", "UNKNOWN"),
                 "balance_assessment": readability.get("balance_assessment", "UNKNOWN"),
-                "benchmark": "Optimal readability for B2B content is Grade 8-12 with 5-15% complex word ratio",
+                "benchmark": "(General industry guidance, unverified): Optimal readability for B2B content is Grade 8-12 with 5-15% complex word ratio",
                 "statistical_range": f"Grade level: {readability.get('flesch_kincaid_grade', 0):.1f} ({readability.get('readability_tier', 'UNKNOWN')})",
                 "expert_recommendation": "Aim for Grade 8-12 readability with DEEP complexity tier for professional audiences",
                 "common_mistakes": ["Writing too simply for professional audiences", "Over-complicating without need", "Not balancing accessibility with depth"],
-                "success_metrics": ["Grade 8-12 readability", "DEEP complexity tier", "WELL_BALANCED or ACCESSIBLE_WITH_DEPTH assessment"]
+                "success_metrics": ["Grade 8-12 readability", "DEEP complexity tier", "WELL_BALANCED or ACCESSIBLE_WITH_DEPTH assessment"],
+                "data_origin": "unverified_industry_heuristic - not measured for this page"
             },
             "overall_quality_insights": {
                 "overall_score": overall_quality.get("overall_score", 0),
                 "quality_grade": overall_quality.get("quality_grade", "UNKNOWN"),
                 "primary_improvement_areas": overall_quality.get("primary_improvement_areas", []),
-                "benchmark": "Grade A content scores 0.8+; Grade B is acceptable; Grade C or below requires revision",
+                "benchmark": "(General industry guidance, unverified): Grade A content scores 0.8+; Grade B is acceptable; Grade C or below requires revision",
                 "statistical_range": f"Overall quality: {overall_quality.get('overall_score', 0)*100:.0f}% ({overall_quality.get('quality_grade', 'UNKNOWN')})",
                 "expert_recommendation": "Address primary improvement areas in priority order: AI patterns first, then burstiness, then tropes",
                 "common_mistakes": ["Not addressing the primary improvement area", "Making surface-level changes without structural rewriting", "Publishing content below Grade B quality"],
-                "success_metrics": ["Quality grade B+ or higher", "Overall score > 0.7", "All penalties < 0.15"]
+                "success_metrics": ["Quality grade B+ or higher", "Overall score > 0.7", "All penalties < 0.15"],
+                "data_origin": "unverified_industry_heuristic - not measured for this page"
             }
         }

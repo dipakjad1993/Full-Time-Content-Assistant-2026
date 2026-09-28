@@ -148,14 +148,14 @@ class InternalLinkCannibalization:
             "internal_links_count": len(internal_links),
             "external_links_count": len(external_links),
             "link_density_per_100_words": round(link_density, 2),
-            "link_density_benchmark": "Optimal: 1-4 links per 100 words",
+            "link_density_benchmark": "(General industry guidance, unverified): 1-4 links per 100 words is a common target",
             "internal_domains": list(internal_domains),
             "internal_domains_count": len(internal_domains),
             "external_domains": list(external_domains),
             "external_domains_count": len(external_domains),
             "external_tld_distribution": external_tlds,
             "gov_edu_links": gov_edu_links,
-            "gov_edu_benchmark": "Recommended: 1-2 .edu/.gov links for authority",
+            "gov_edu_benchmark": "(General industry guidance, unverified): 1-2 .edu/.gov links is a common recommendation for authority",
             "link_quality_score": round(link_quality_score, 3),
             "link_quality_tier": (
                 "EXCELLENT - Well-balanced link profile" if link_quality_score > 0.8 else
@@ -240,9 +240,9 @@ class InternalLinkCannibalization:
         return {
             "anchor_text_distribution": anchor_text_patterns,
             "diversity_score": round(diversity_score, 3),
-            "diversity_benchmark": "Ideal: 4+ anchor text types with no single type >50%",
+            "diversity_benchmark": "(General industry guidance, unverified): 4+ anchor text types with no single type >50% is ideal",
             "generic_anchor_count": anchor_text_patterns["generic"],
-            "generic_anchor_benchmark": "Reduce generic anchors ('click here', 'read more') to <20%",
+            "generic_anchor_benchmark": "(General industry guidance, unverified): Reduce generic anchors ('click here', 'read more') to <20%",
             "recommendation": "Use varied anchor text: exact match, partial match, natural, and branded"
         }
 
@@ -472,18 +472,26 @@ class InternalLinkCannibalization:
         page_words = set(tokenize_words(f"{page.get('title', '')} {page.get('snippet', '')}"))
         target_words = set(tokenize_words(f"{seed} {entity}"))
         relevance = len(page_words & target_words) / max(1, len(target_words))
-        page_authority = min(1.0, (page.get("domain_authority", 50) / 100) +
-                           (page.get("page_authority", 30) / 100))
-        score = (relevance * 0.5 + page_authority * 0.3 + 0.2)
+        domain_authority = page.get("domain_authority")
+        page_authority = page.get("page_authority")
+        authority_known = isinstance(domain_authority, (int, float)) and isinstance(page_authority, (int, float))
+        if authority_known:
+            page_authority_score = min(1.0, (domain_authority / 100) + (page_authority / 100))
+        else:
+            page_authority_score = 0.0
+        score = (relevance * 0.5 + page_authority_score * 0.3 + 0.2)
         anchor = f"{entity.title()} best practices" if relevance > 0.5 else page.get("title", entity)[:50]
         direction = "outbound_from_new" if score > 0.5 else "inbound_to_new"
         priority = "CRITICAL" if score > 0.7 else "HIGH" if score > 0.5 else "MEDIUM" if score > 0.3 else "LOW"
-        return {
+        result = {
             "score": round(min(1.0, score), 3),
             "anchor": anchor,
             "direction": direction,
             "priority": priority
         }
+        if not authority_known:
+            result["authority_note"] = "Domain/page authority not available from live data - priority reflects topical relevance only"
+        return result
 
     def _generate_anchor_text_variations(self, seed: str, entity: str) -> List[Dict[str, str]]:
         """Generate varied anchor text recommendations."""
@@ -720,51 +728,56 @@ class InternalLinkCannibalization:
                 "risk_level": cannibalization.get("cannibalization_risk", "LOW"),
                 "total_competing": cannibalization.get("total_competing", 0),
                 "estimated_organic_split": cannibalization.get("estimated_organic_split", "N/A"),
-                "benchmark": "Sites with 0-1 competing pages per query see 60-80% higher organic CTR than sites with 3+ competitors",
+                "benchmark": "(General industry guidance, unverified): Sites with 0-1 competing pages per query see 60-80% higher organic CTR than sites with 3+ competitors",
                 "statistical_range": f"Cannibalization risk: {cannibalization.get('cannibalization_risk', 'LOW')} with {cannibalization.get('total_competing', 0)} competing pages",
                 "expert_recommendation": "Address CRITICAL cannibalization before publishing - merge or radically differentiate overlapping content",
                 "common_mistakes": ["Publishing new content without checking for existing overlapping pages", "Ignoring GSC query overlap data", "Not establishing clear canonical hierarchy"],
-                "success_metrics": ["Cannibalization risk reduced to LOW", "Zero CRITICAL competing pages", "Organic CTR improvement > 20%"]
+                "success_metrics": ["Cannibalization risk reduced to LOW", "Zero CRITICAL competing pages", "Organic CTR improvement > 20%"],
+                "data_origin": "unverified_industry_heuristic - not measured for this page"
             },
             "link_plan_insights": {
                 "total_link_opportunities": link_plan.get("total_link_opportunities", 0),
                 "high_priority_links": len(link_plan.get("high_priority_links", [])),
                 "anchor_text_variations": len(link_plan.get("anchor_text_variations", [])),
-                "benchmark": "New content should receive 5 internal links on day 1 and 10+ within month 1 for proper link equity flow",
-                "statistical_range": f"Link opportunities: {link_plan.get('total_link_opportunities', 0)} (target: 10+ high-priority)",
+                "benchmark": "(General industry guidance, unverified): New content should receive 5 internal links on day 1 and 10+ within month 1 for proper link equity flow",
+                "statistical_range": f"Link opportunities: {link_plan.get('total_link_opportunities', 0)} (unverified heuristic target: 10+ high-priority)",
                 "expert_recommendation": "Implement 3-5 high-priority links on day 1 with exact match and partial match anchor text variations",
                 "common_mistakes": ["Using identical anchor text for all internal links", "Not linking from highest-authority pages", "Ignoring orphan page rescue"],
-                "success_metrics": ["5+ links on day 1", "10+ links within month 1", "Anchor text diversity > 3 variations"]
+                "success_metrics": ["5+ links on day 1", "10+ links within month 1", "Anchor text diversity > 3 variations"],
+                "data_origin": "unverified_industry_heuristic - not measured for this page"
             },
             "page_authority_insights": {
                 "average_authority": page_authority.get("average_authority", 0),
                 "link_equity_available": page_authority.get("link_equity_available", 0),
                 "high_authority_pages": len(page_authority.get("high_authority_pages", [])),
-                "benchmark": "Pages with DA 60+ provide highest link equity; aim to link from 3+ high-authority pages within week 1",
-                "statistical_range": f"Average page authority: {page_authority.get('average_authority', 0):.0f}/100 (target: 50+)",
+                "benchmark": "(General industry guidance, unverified): Pages with DA 60+ provide highest link equity; aim to link from 3+ high-authority pages within week 1",
+                "statistical_range": f"Average page authority: {page_authority.get('average_authority', 0):.0f}/100 (unverified heuristic target: 50+)",
                 "expert_recommendation": "Prioritize link acquisition from pages with DA > 60 for maximum link equity transfer",
                 "common_mistakes": ["Linking only from low-authority pages", "Ignoring page authority distribution", "Not monitoring link equity flow"],
-                "success_metrics": ["Average authority > 50", "3+ high-authority links", "Link equity distributed across 10+ pages"]
+                "success_metrics": ["Average authority > 50", "3+ high-authority links", "Link equity distributed across 10+ pages"],
+                "data_origin": "unverified_industry_heuristic - not measured for this page"
             },
             "internal_link_graph_insights": {
                 "total_nodes": internal_link_graph.get("graph_summary", {}).get("total_nodes", 0),
                 "hub_pages": internal_link_graph.get("graph_summary", {}).get("hub_pages", 0),
                 "orphan_pages": internal_link_graph.get("graph_summary", {}).get("orphan_pages", 0),
                 "average_links": internal_link_graph.get("graph_summary", {}).get("average_links_per_page", 0),
-                "benchmark": "Healthy link graphs have 3-5 hub pages, <5 orphan pages, and 5+ average links per page",
+                "benchmark": "(General industry guidance, unverified): Healthy link graphs have 3-5 hub pages, <5 orphan pages, and 5+ average links per page",
                 "statistical_range": f"Graph: {internal_link_graph.get('graph_summary', {}).get('total_nodes', 0)} pages, {internal_link_graph.get('graph_summary', {}).get('orphan_pages', 0)} orphans",
                 "expert_recommendation": "Rescue all orphan pages by adding internal links and create hub pages for top topics",
                 "common_mistakes": ["Ignoring orphan pages (zero link equity)", "Not creating hub pages for key topics", "Average links per page below 3"],
-                "success_metrics": ["Orphan pages < 3", "Hub pages > 3", "Average links per page > 5"]
+                "success_metrics": ["Orphan pages < 3", "Hub pages > 3", "Average links per page > 5"],
+                "data_origin": "unverified_industry_heuristic - not measured for this page"
             },
             "fresh_content_strategy_insights": {
                 "day_1_actions": len(fresh_content_strategy.get("day_1_actions", [])),
                 "week_1_actions": len(fresh_content_strategy.get("week_1_actions", [])),
                 "month_1_actions": len(fresh_content_strategy.get("month_1_actions", [])),
-                "benchmark": "Content with 5+ internal links on day 1 sees 40-60% faster indexing and ranking than content with 0-2 links",
+                "benchmark": "(General industry guidance, unverified): Content with 5+ internal links on day 1 sees 40-60% faster indexing and ranking than content with 0-2 links",
                 "statistical_range": f"Link deployment plan: {len(fresh_content_strategy.get('day_1_actions', []))} day-1, {len(fresh_content_strategy.get('week_1_actions', []))} week-1, {len(fresh_content_strategy.get('month_1_actions', []))} month-1 actions",
                 "expert_recommendation": "Execute all day-1 actions immediately upon publishing for fastest indexing and ranking",
                 "common_mistakes": ["Delaying internal link implementation beyond day 1", "Not submitting to Indexing API", "Missing site-wide navigation links"],
-                "success_metrics": ["Indexed within 48 hours", "5+ internal links day 1", "Ranking within 30 days"]
+                "success_metrics": ["Indexed within 48 hours", "5+ internal links day 1", "Ranking within 30 days"],
+                "data_origin": "unverified_industry_heuristic - not measured for this page"
             }
         }

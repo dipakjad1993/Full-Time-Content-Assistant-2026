@@ -15,12 +15,16 @@ class MultimodalAssetBlueprint:
         self.module_name = "Interactive & Multi-Modal Asset Blueprint"
 
     def analyze(self, text: str, outline: Dict = None, schema_data: Dict = None, inputs: Dict = None) -> Dict[str, Any]:
-        """Full multi-modal asset planning pipeline."""
+        """Full multi-modal asset planning pipeline with REAL competitor analysis."""
         if not text.strip():
             return {"module": self.module_id, "module_name": self.module_name, "error": "No text provided"}
 
         inputs = inputs or {}
         url_data = inputs.get("_url_data", None)
+        
+        # NEW: Use real competitor data
+        real_competitor_pages = inputs.get("real_competitor_pages", [])
+        real_content_analysis = inputs.get("real_content_analysis", {})
 
         real_url_findings = {}
         if url_data:
@@ -35,6 +39,9 @@ class MultimodalAssetBlueprint:
         infographic_specs = self._generate_infographic_specifications(text, data_points)
         alt_text_pipeline = self._generate_alt_text_pipeline(image_specs, schema_data)
         asset_deployment = self._plan_asset_deployment(chart_specs, calculator_specs, image_specs)
+        
+        # NEW: Analyze real competitor multimodal usage
+        real_competitor_multimodal = self._analyze_real_competitor_multimodal(real_competitor_pages, real_content_analysis)
 
         return {
             "module": self.module_id,
@@ -80,6 +87,7 @@ class MultimodalAssetBlueprint:
             ],
             "detailed_analysis": {
                 "industry_benchmarks": {
+                    "data_origin": "unverified_industry_heuristic - not measured for this page",
                     "average_assets_per_article": "3-5 visual assets for top-performing content",
                     "chart_engagement_rate": "Charts increase dwell time by 25-40% vs text-only",
                     "calculator_conversion_rate": "Interactive calculators generate 2-3x more leads than static content",
@@ -87,6 +95,7 @@ class MultimodalAssetBlueprint:
                     "image_optimization_impact": "WebP images reduce load time by 30-50% vs JPEG"
                 },
                 "statistical_ranges": {
+                    "data_origin": "unverified_industry_heuristic - not measured for this page",
                     "optimal_image_count": "4-8 images per 2000-word article",
                     "chart_data_points": "3-6 data points per chart for clarity",
                     "calculator_input_fields": "4-6 fields maximum to avoid abandonment",
@@ -120,7 +129,70 @@ class MultimodalAssetBlueprint:
                     "Page load speed impact after asset optimization",
                     "Rich result appearance rate for schema-marked assets"
                 ]
-            }
+            },
+            "real_competitor_multimodal_analysis": real_competitor_multimodal,
+            "data_source": "real_time_competitor_analysis" if real_competitor_multimodal and "error" not in real_competitor_multimodal else "heuristic_analysis"
+        }
+
+    def _analyze_real_competitor_multimodal(self, competitor_pages: List[Dict], content_analysis: Dict) -> Dict[str, Any]:
+        """Analyze real competitor multimodal asset usage from live pages."""
+        if not competitor_pages:
+            return {"error": "No competitor data available"}
+        
+        successful_pages = [p for p in competitor_pages if p.get("fetch_success")]
+        if not successful_pages:
+            return {"error": "No successful competitor fetches"}
+        
+        competitor_assets = []
+        for page in competitor_pages:
+            if not page.get("fetch_success"):
+                continue
+            images = page.get("images", [])
+            image_count = page.get("image_count", 0)
+            link_count = page.get("link_count", 0)
+            has_schema = page.get("has_schema", False)
+            
+            # Count different types of visual assets
+            chart_indicators = len([img for img in images if any(w in img.get("src", "").lower() or img.get("alt", "").lower() for w in ["chart", "graph", "data", "stat", "infographic"])])
+            hero_images = len([img for img in images if any(w in img.get("src", "").lower() or img.get("alt", "").lower() for w in ["hero", "banner", "featured", "main", "cover"])])
+            screenshots = len([img for img in images if any(w in img.get("src", "").lower() or img.get("alt", "").lower() for w in ["screenshot", "screen", "demo", "interface", "ui"])])
+            
+            competitor_assets.append({
+                "url": page.get("url", ""),
+                "position": page.get("position", 0),
+                "total_images": image_count,
+                "chart_indicators": chart_indicators,
+                "hero_images": hero_images,
+                "screenshots": screenshots,
+                "other_images": image_count - chart_indicators - hero_images - screenshots,
+                "has_schema": has_schema,
+                "word_count": page.get("word_count", 0),
+                "images_per_1000_words": round(image_count / max(1, page.get("word_count", 1)) * 1000, 1),
+                "alt_text_examples": [img.get("alt", "") for img in images[:5] if img.get("alt")]
+            })
+        
+        # Calculate benchmarks
+        avg_images = sum(c["total_images"] for c in competitor_assets) / len(competitor_assets) if competitor_assets else 0
+        avg_images_per_1000 = sum(c["images_per_1000_words"] for c in competitor_assets) / len(competitor_assets) if competitor_assets else 0
+        avg_charts = sum(c["chart_indicators"] for c in competitor_assets) / len(competitor_assets) if competitor_assets else 0
+        schema_users = sum(1 for c in competitor_assets if c["has_schema"])
+        
+        return {
+            "competitors_analyzed": len(competitor_assets),
+            "competitor_asset_details": competitor_assets,
+            "benchmarks_from_real_data": {
+                "avg_images_per_page": round(avg_images, 1),
+                "avg_images_per_1000_words": round(avg_images_per_1000, 1),
+                "avg_charts_per_page": round(avg_charts, 1),
+                "schema_usage": f"{schema_users}/{len(competitor_assets)}"
+            },
+            "recommendations": [
+                f"Add {round(avg_images)} images per page (competitors average {avg_images:.1f})",
+                f"Target {round(avg_images_per_1000)} images per 1000 words",
+                f"Add {max(0, 2 - int(avg_charts))} chart/graph visualizations",
+                "Implement schema markup for visual assets" if schema_users < len(competitor_assets) else "Schema markup is competitive"
+            ],
+            "data_source": "live_competitor_page_analysis"
         }
 
     def _analyze_url_multimodal(self, text: str, url_data: Dict, outline: Dict = None) -> Dict[str, Any]:
@@ -186,28 +258,28 @@ class MultimodalAssetBlueprint:
                 "gap": f"Page contains {data_in_text} percentage statistics but no data visualization",
                 "recommendation": "Add bar chart or infographic to visualize key statistics",
                 "priority": "HIGH",
-                "impact": "Charts increase dwell time by 25-40% per industry research"
+                "impact": "(General industry guidance, unverified): Charts increase dwell time by 25-40% per industry research"
             })
         if comparison_in_text and image_count < 3:
             visual_gaps.append({
                 "gap": "Comparison/alternative content present but lacks visual comparison table",
                 "recommendation": "Add feature comparison matrix or pricing table visual",
                 "priority": "HIGH",
-                "impact": "Comparison visuals increase conversion by 15-25%"
+                "impact": "(General industry guidance, unverified): Comparison visuals increase conversion by 15-25%"
             })
         if process_in_text and image_count < 2:
             visual_gaps.append({
                 "gap": "Process/implementation content lacks step-by-step visuals",
                 "recommendation": "Add process flow diagram or step-by-step illustration",
                 "priority": "MEDIUM",
-                "impact": "Process visuals improve comprehension by 30%"
+                "impact": "(General industry guidance, unverified): Process visuals improve comprehension by 30%"
             })
         if actual_word_count > 1500 and image_count < 4:
             visual_gaps.append({
                 "gap": f"Long-form content ({actual_word_count} words) with only {image_count} images",
                 "recommendation": f"Add {max(2, images_needed_for_optimal)} more images to reach optimal 1-per-300-words ratio",
                 "priority": "MEDIUM",
-                "impact": "Long-form content with adequate visuals retains 40% more readers"
+                "impact": "(General industry guidance, unverified): Long-form content with adequate visuals retains 40% more readers"
             })
         if not quote_in_text and actual_word_count > 800:
             visual_gaps.append({
@@ -262,6 +334,7 @@ class MultimodalAssetBlueprint:
             "image_to_text_ratio": {
                 "current_ratio": f"1 image per {int(actual_word_count / max(1, image_count))} words",
                 "ideal_ratio": "1 image per 300 words",
+                "ideal_ratio_origin": "unverified_industry_heuristic - not measured for this page",
                 "ratio_score": round(min(1.0, ratio_comparison), 3),
                 "status": "OPTIMAL" if ratio_comparison >= 0.8 else "NEEDS_MORE" if ratio_comparison >= 0.5 else "CRITICALLY_LOW"
             },
@@ -290,6 +363,7 @@ class MultimodalAssetBlueprint:
                 "images_needing_schema": len(images)
             },
             "benchmark_comparison": {
+                "data_origin": "unverified_industry_heuristic - not measured for this page",
                 "top_content_avg_images": "4-8 images per 2000-word article",
                 "your_image_density": f"{round(image_count / max(1, actual_word_count / 1000), 1)} images per 1000 words",
                 "industry_standard": "3-5 images per 1000 words for optimal engagement",
@@ -410,10 +484,10 @@ class MultimodalAssetBlueprint:
                 "title": "ROI Calculator",
                 "description": "Calculate return on investment for [entity]",
                 "input_fields": [
-                    {"name": "current_annual_cost", "type": "currency", "label": "Current Annual Cost ($)", "default": 50000},
-                    {"name": "implementation_cost", "type": "currency", "label": "Implementation Cost ($)", "default": 15000},
-                    {"name": "annual_savings_percent", "type": "percentage", "label": "Expected Annual Savings (%)", "default": 30},
-                    {"name": "time_period_years", "type": "number", "label": "Analysis Period (Years)", "default": 3}
+                    {"name": "current_annual_cost", "type": "currency", "label": "Current Annual Cost ($)", "default": 50000, "value_origin": "example placeholder - not measured data; replace with actual figures"},
+                    {"name": "implementation_cost", "type": "currency", "label": "Implementation Cost ($)", "default": 15000, "value_origin": "example placeholder - not measured data; replace with actual figures"},
+                    {"name": "annual_savings_percent", "type": "percentage", "label": "Expected Annual Savings (%)", "default": 30, "value_origin": "example placeholder - not measured data; replace with actual figures"},
+                    {"name": "time_period_years", "type": "number", "label": "Analysis Period (Years)", "default": 3, "value_origin": "example placeholder - not measured data; replace with actual figures"}
                 ],
                 "output_fields": [
                     {"name": "total_savings", "type": "currency", "formula": "current_annual_cost * (annual_savings_percent/100) * time_period_years"},
@@ -445,7 +519,7 @@ class MultimodalAssetBlueprint:
                     {"name": "solution_b_name", "type": "text", "label": "Solution B Name"},
                     {"name": "solution_b_price", "type": "currency", "label": "Solution B Monthly Price ($)"},
                     {"name": "solution_b_features", "type": "checkbox_group", "label": "Solution B Features"},
-                    {"name": "team_size", "type": "number", "label": "Team Size", "default": 10}
+                    {"name": "team_size", "type": "number", "label": "Team Size", "default": 10, "value_origin": "example placeholder - not measured data; replace with actual figures"}
                 ],
                 "output_fields": [
                     {"name": "annual_cost_a", "type": "currency"},
@@ -475,7 +549,7 @@ class MultimodalAssetBlueprint:
                     {"name": "training_cost", "type": "currency", "label": "Annual Training Cost ($)"},
                     {"name": "maintenance_cost", "type": "currency", "label": "Annual Maintenance Cost ($)"},
                     {"name": "personnel_cost", "type": "currency", "label": "Annual Personnel Cost ($)"},
-                    {"name": "years", "type": "number", "label": "Analysis Period (Years)", "default": 3}
+                    {"name": "years", "type": "number", "label": "Analysis Period (Years)", "default": 3, "value_origin": "example placeholder - not measured data; replace with actual figures"}
                 ],
                 "output_fields": [
                     {"name": "total_tco", "type": "currency"},

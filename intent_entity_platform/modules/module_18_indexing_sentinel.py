@@ -81,6 +81,7 @@ class IndexingLogSentinel:
             ],
             "detailed_analysis": {
                 "indexing_benchmarks": {
+                    "data_origin": "unverified_industry_heuristic - not measured for this page",
                     "google_indexing_api_response_time": "Minutes to hours for URL_UPDATED type",
                     "bing_indexnow_response_time": "Within 24 hours for most submissions",
                     "typical_crawl_budget_per_site": "Small sites: 50-200 pages/day; Large sites: 1000-10000+ pages/day",
@@ -88,6 +89,7 @@ class IndexingLogSentinel:
                     "crawl_frequency_for_important_pages": "Daily to weekly depending on authority and update frequency"
                 },
                 "server_log_analysis_benchmarks": {
+                    "data_origin": "unverified_industry_heuristic - not measured for this page",
                     "healthy_googlebot_crawl_rate": "10-50% of total bot traffic for established sites",
                     "acceptable_error_rate": "Under 1% of total requests",
                     "critical_5xx_threshold": "Any 5xx error on important pages requires immediate attention",
@@ -109,11 +111,11 @@ class IndexingLogSentinel:
                     "Ignoring crawl budget waste from 404 errors on deleted or moved content"
                 ],
                 "success_metrics": [
-                    "Track Googlebot crawl frequency via GSC Crawl Stats report (target: daily for key pages)",
-                    "Monitor indexing coverage in GSC - aim for 95%+ of important URLs indexed",
-                    "Measure server error rate from logs (target: <0.1% of total requests)",
-                    "Track time from publish to first Googlebot crawl (target: <48 hours with API push)",
-                    "Monitor IndexNow submission success rate (target: 100% accepted responses)"
+                    "(General industry guidance, unverified): Track Googlebot crawl frequency via GSC Crawl Stats report (target: daily for key pages)",
+                    "(General industry guidance, unverified): Monitor indexing coverage in GSC - aim for 95%+ of important URLs indexed",
+                    "(General industry guidance, unverified): Measure server error rate from logs (target: <0.1% of total requests)",
+                    "(General industry guidance, unverified): Track time from publish to first Googlebot crawl (target: <48 hours with API push)",
+                    "(General industry guidance, unverified): Monitor IndexNow submission success rate (target: 100% accepted responses)"
                 ]
             }
         }

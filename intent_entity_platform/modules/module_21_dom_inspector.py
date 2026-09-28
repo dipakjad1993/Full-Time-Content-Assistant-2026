@@ -40,7 +40,26 @@ class DOMInspector:
         url_dom_analysis = self._analyze_url_dom_structure(_url_data) if _url_data else {}
 
         if not html_content.strip() and not _url_data:
-            return {"module": self.module_id, "module_name": self.module_name, "error": "No HTML or URL data provided"}
+            return {
+                "module": self.module_id,
+                "module_name": self.module_name,
+                "status": "SKIPPED",
+                "message": "DOM inspection requires a target URL or HTML content. Run in URL Analysis mode (or provide page HTML) to enable this module.",
+                "dom_analysis": {"status": "NO_URL_DATA", "message": "Provide a URL or HTML content for DOM inspection"},
+                "optimization_recommendations": [
+                    "Run this module in URL Analysis mode to inspect the live DOM structure of the page.",
+                    "Use Google Lighthouse or PageSpeed Insights to measure DOM size, nesting depth, and CLS.",
+                    "Keep total DOM elements under 1,500 and maximum nesting depth under 32 as general performance guidance."
+                ],
+                "recommendations": [
+                    {"priority": "MEDIUM", "action": "Run DOM inspection on a target URL", "detail": "This module needs a URL or HTML input to analyze DOM complexity, resource weights, and interactive elements."}
+                ],
+                "implementation_steps": [
+                    "Step 1: Provide a target URL or paste the page HTML into URL Analysis mode.",
+                    "Step 2: Run the analysis to get total DOM element count and nesting depth metrics."
+                ],
+                "where_to_add": ["Run via URL Analysis mode to get URL-specific DOM metrics."]
+            }
 
         dom_analysis = estimate_dom_complexity(html_content) if html_content.strip() else self._estimate_dom_from_url_data(_url_data)
         resource_analysis = self._analyze_resource_weights(html_content) if html_content.strip() else self._estimate_resources_from_url_data(_url_data)
@@ -94,7 +113,8 @@ class DOMInspector:
                     "google_recommended_max": "Under 1,500 DOM nodes (Google Lighthouse best practice)",
                     "acceptable_range": "1,500-3,000 elements with manageable impact on rendering",
                     "critical_threshold": "Over 3,000 elements causes significant performance degradation",
-                    "mobile_impact_multiplier": "DOM size impact is 2-3x worse on mobile devices vs. desktop"
+                    "mobile_impact_multiplier": "DOM size impact is 2-3x worse on mobile devices vs. desktop",
+                    "data_origin": "unverified_industry_heuristic - not measured for this page"
                 },
                 "core_web_vitals_benchmarks": {
                     "lcp_good_threshold": "Under 2.5 seconds for Largest Contentful Paint",
@@ -108,30 +128,32 @@ class DOMInspector:
                     "javascript_budget": "Under 300KB compressed for critical scripts",
                     "css_budget": "Under 100KB for critical CSS (inline), 200KB total with deferred",
                     "image_optimization_target": "WebP/AVIF formats at 80% quality with responsive srcset",
-                    "font_loading_target": "Under 100KB total for 2-3 font weights with font-display: swap"
+                    "font_loading_target": "Under 100KB total for 2-3 font weights with font-display: swap",
+                    "data_origin": "unverified_industry_heuristic - not measured for this page"
                 },
                 "expert_recommendations": [
-                    "Profile DOM size with browser DevTools - aim for under 1,500 nodes for fast rendering",
-                    "Use CSS containment (contain property) to isolate complex layout sections from reflow",
-                    "Implement virtual scrolling for long lists instead of rendering all items in DOM",
-                    "Use Intersection Observer API for lazy loading instead of scroll event listeners",
-                    "Test on real mobile devices, not just Chrome DevTools throttling - real-world performance differs"
+                    "(General industry guidance, unverified): Profile DOM size with browser DevTools - a heuristic target is under 1,500 nodes for fast rendering",
+                    "(General industry guidance, unverified): Use CSS containment (contain property) to isolate complex layout sections from reflow",
+                    "(General industry guidance, unverified): Implement virtual scrolling for long lists instead of rendering all items in DOM",
+                    "(General industry guidance, unverified): Use Intersection Observer API for lazy loading instead of scroll event listeners",
+                    "(General industry guidance, unverified): Test on real mobile devices, not just Chrome DevTools throttling - real-world performance differs"
                 ],
                 "common_mistakes": [
-                    "Using tables for layout instead of CSS Grid/Flexbox - tables create complex rendering trees",
-                    "Loading all JavaScript upfront with no defer/async - blocks main thread and delays interactivity",
-                    "Missing image dimensions causes CLS - Google penalizes high CLS in search rankings",
-                    "Too many web fonts (5+) add render-blocking requests and slow FCP significantly",
-                    "Deeply nested DOM (>10 levels) increases paint complexity and memory usage"
+                    "(General industry guidance, unverified): Using tables for layout instead of CSS Grid/Flexbox - tables create complex rendering trees",
+                    "(General industry guidance, unverified): Loading all JavaScript upfront with no defer/async - blocks main thread and delays interactivity",
+                    "(General industry guidance, unverified): Missing image dimensions causes CLS - high CLS is reported to hurt search rankings",
+                    "(General industry guidance, unverified): Too many web fonts (5+) add render-blocking requests and can slow FCP significantly",
+                    "(General industry guidance, unverified): Deeply nested DOM (>10 levels) increases paint complexity and memory usage"
                 ],
                 "success_metrics": [
-                    "Track DOM element count and target under 1,500 (Lighthouse benchmark)",
-                    "Measure LCP, FID, CLS, and INP via Chrome UX Report or PageSpeed Insights",
-                    "Monitor CLS score - target under 0.1 for good Core Web Vitals rating",
-                    "Track page weight in KB/MB and target under 3MB for mobile performance",
-                    "Measure Time to Interactive (TTI) and target under 3.5 seconds on mobile 4G"
+                    "(General industry guidance, unverified): Track DOM element count and target under 1,500 (Lighthouse best-practice heuristic)",
+                    "(General industry guidance, unverified): Measure LCP, FID, CLS, and INP via Chrome UX Report or PageSpeed Insights",
+                    "(Guidance; the CLS threshold 0.1 is a real published Google Core Web Vitals value): Monitor CLS score - target under 0.1 for good Core Web Vitals rating",
+                    "(General industry guidance, unverified): Track page weight in KB/MB and target under 3MB for mobile performance",
+                    "(General industry guidance, unverified): Measure Time to Interactive (TTI) and target under 3.5 seconds on mobile 4G"
                 ]
-            }
+            },
+            "data_source": "real_time_analysis"
         }
 
     def _analyze_url_dom_structure(self, url_data: Dict) -> Dict[str, Any]:

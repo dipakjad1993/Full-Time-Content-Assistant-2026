@@ -71,6 +71,7 @@ class BrandComplianceEngine:
             ],
             "detailed_analysis": {
                 "industry_benchmarks": {
+                    "data_origin": "unverified_industry_heuristic - not measured for this page",
                     "compliance_violation_rate": "Average content has 3-7 compliance violations per 1000 words",
                     "legal_review_cycle_time": "Legal review typically adds 2-5 business days to publication timeline",
                     "trademark_violation_frequency": "15-20% of content contains trademark formatting errors",
@@ -78,6 +79,7 @@ class BrandComplianceEngine:
                     "anti_trope_compliance_rate": "Top brands achieve 90%+ anti-trope compliance"
                 },
                 "statistical_ranges": {
+                    "data_origin": "unverified_industry_heuristic - not measured for this page",
                     "critical_violations_per_article": "0-1 critical violations acceptable",
                     "high_violations_per_article": "0-3 high violations before requiring revision",
                     "disclaimer_placement_accuracy": "Disclaimers should be within 100 words of relevant content",

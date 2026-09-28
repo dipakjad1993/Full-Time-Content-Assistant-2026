@@ -76,6 +76,7 @@ class RAGTester:
             ],
             "detailed_analysis": {
                 "industry_benchmarks": {
+                    "data_origin": "unverified_industry_heuristic - not measured for this page",
                     "optimal_chunk_size": "200-500 tokens (OpenAI/Anthropic standard for embedding)",
                     "self_contained_chunk_ratio": "Top-performing RAG content achieves 90%+ self-contained chunks",
                     "query_alignment_score": "Excellent alignment: >0.7 cosine similarity with target queries",
@@ -83,6 +84,7 @@ class RAGTester:
                     "retrieval_accuracy": "Well-optimized content achieves 80%+ retrieval accuracy in RAG systems"
                 },
                 "statistical_ranges": {
+                    "data_origin": "unverified_industry_heuristic - not measured for this page",
                     "chunk_token_range": "200-500 tokens per chunk (optimal for embedding windows)",
                     "sentence_count_per_chunk": "3-8 sentences for adequate context without noise",
                     "entity_mentions_per_chunk": "2-3 explicit entity mentions for embedding clarity",
@@ -116,7 +118,8 @@ class RAGTester:
                     "RAG answer quality ratings from user testing",
                     "Citation accuracy when content is used in AI responses"
                 ]
-            }
+            },
+            "data_source": "real_time_analysis"
         }
 
     def _analyze_url_rag_compatibility(self, url_data: Dict, target_queries: List[str] = None) -> Dict[str, Any]:
@@ -254,7 +257,7 @@ class RAGTester:
             rag_recommendations.append({
                 "priority": "HIGH",
                 "action": f"Add definition sentences at the start of chunks (only {definition_chunks}/{total_chunks} have definitions)",
-                "impact": "Definition-led chunks increase retrieval relevance by 30-45%"
+                "impact": "(General industry guidance, unverified): Definition-led chunks increase retrieval relevance by 30-45%"
             })
         if standalone_chunks / max(1, total_chunks) < 0.7:
             rag_recommendations.append({
@@ -544,7 +547,7 @@ class RAGTester:
                     "action": "Ensure each chunk starts with a clear topic sentence",
                     "priority": "HIGH",
                     "affected_chunks": sum(1 for c in chunks if not c.get("starts_with_definition")),
-                    "impact": "Increases retrieval relevance by 20-35%"
+                    "impact": "(General industry guidance, unverified): Increases retrieval relevance by 20-35%"
                 },
                 {
                     "action": "Fix ambiguous pronouns in chunk openings",

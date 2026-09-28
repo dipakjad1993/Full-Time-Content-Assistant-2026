@@ -22,6 +22,8 @@ class ContentDecayEngine:
         entity = inputs.get("primary_entity", "content strategy")
         gsc_data = inputs.get("gsc_data", {})
         competitor_data = inputs.get("competitor_data", [])
+        if isinstance(competitor_data, dict):
+            competitor_data = competitor_data.get("competitor_pages", []) or []
 
         _url_data = inputs.get("_url_data", {})
         url_page_text = _url_data.get("page_text", "")
@@ -52,7 +54,7 @@ class ContentDecayEngine:
         result = {
             "module": self.module_id,
             "module_name": self.module_name,
-            "url_analyzed": url_url or url or "Not provided - using sample analysis",
+            "url_analyzed": url_url or url or "",
             "analysis_date": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
             "decay_indicators": decay_indicators,
             "gsc_impairments": gsc_impairments,
@@ -69,7 +71,7 @@ class ContentDecayEngine:
             "content_lifecycle": {
                 "current_phase": content_freshness.get("freshness_status", "UNKNOWN"),
                 "estimated_remaining_shelf_life": self._estimate_shelf_life(decay_indicators, content_freshness),
-                "optimal_refresh_frequency": "Every 3-6 months for competitive niches, 6-12 for evergreen",
+                "optimal_refresh_frequency": "(General industry guidance, unverified): Every 3-6 months for competitive niches, 6-12 for evergreen",
                 "last_significant_update": publish_date or "Unknown",
                 "days_since_publish": self._calculate_days_since(publish_date),
                 "content_half_life_estimate": f"{self._estimate_half_life(decay_indicators)} days"
@@ -77,7 +79,7 @@ class ContentDecayEngine:
             "seasonal_patterns": {
                 "seasonal_sensitivity": "MODERATE" if not gsc_data else "HIGH - Analyze GSC trends",
                 "recommended_update_windows": ["Q1 (January-March)", "Q3 (July-September)"],
-                "holiday_impact": "Monitor for 2-4 weeks before major holidays",
+                "holiday_impact": "(General industry guidance, unverified): Monitor for 2-4 weeks before major holidays",
                 "industry_trend_alignment": "Regular review against current best practices"
             },
             "recovery_strategy": {
@@ -128,6 +130,7 @@ class ContentDecayEngine:
             ],
             "detailed_analysis": {
                 "decay_statistics": {
+                    "data_origin": "unverified_industry_heuristic - not measured for this page",
                     "average_content_half_life": "180-365 days depending on niche competitiveness",
                     "competitive_niche_decay_rate": "Content in SaaS/tech niches decays 40% faster than average",
                     "typical_ctr_decline_without_refresh": "15-35% over 12 months for evergreen content",
@@ -135,6 +138,7 @@ class ContentDecayEngine:
                     "impression_loss_compound_rate": "Cumulative 10-20% impression loss per quarter when decay is unchecked"
                 },
                 "industry_benchmarks": {
+                    "data_origin": "unverified_industry_heuristic - not measured for this page",
                     "healthy_freshness_score": "Above 0.6 (content updated within 90 days)",
                     "optimal_refresh_frequency": "Every 90-180 days for competitive topics, 180-365 for evergreen",
                     "target_health_score": "Above 0.8 for top-3 ranking content",
@@ -156,9 +160,9 @@ class ContentDecayEngine:
                     "Forgetting to update schema dateModified and datePublished when making significant changes"
                 ],
                 "success_metrics": [
-                    "Track CTR recovery within 14-30 days post-refresh (target: 10%+ improvement)",
-                    "Monitor average position improvement within 30-60 days",
-                    "Measure impression growth week-over-week for 4 weeks post-update",
+                    "(General industry guidance, unverified): Track CTR recovery within 14-30 days post-refresh (target: 10%+ improvement)",
+                    "(General industry guidance, unverified): Monitor average position improvement within 30-60 days",
+                    "(General industry guidance, unverified): Measure impression growth week-over-week for 4 weeks post-update",
                     "Track returning visitor rate as a signal of renewed content relevance",
                     "Monitor featured snippet and AI Overview inclusion after refresh"
                 ]
@@ -579,18 +583,18 @@ class ContentDecayEngine:
             },
             "MODERATE_DECAY": {
                 "predicted_30_days": "Continued gradual decline if no action taken",
-                "predicted_90_days": "10-20% impression loss expected without intervention",
+                "predicted_90_days": "(General industry guidance, unverified): 10-20% impression loss expected without intervention",
                 "predicted_180_days": "Significant ranking loss likely",
                 "action": "Schedule content refresh within 30 days"
             },
             "HIGH_DECAY": {
-                "predicted_30_days": "15-30% impression/CTR loss expected",
+                "predicted_30_days": "(General industry guidance, unverified): 15-30% impression/CTR loss expected",
                 "predicted_90_days": "Potential page 2 ranking drop",
                 "predicted_180_days": "Page may become invisible for target queries",
                 "action": "Initiate content refresh immediately"
             },
             "CRITICAL_DECAY": {
-                "predicted_30_days": "25-50% impression loss, position drop likely",
+                "predicted_30_days": "(General industry guidance, unverified): 25-50% impression loss, position drop likely",
                 "predicted_90_days": "Page may drop off first 3 pages entirely",
                 "predicted_180_days": "Content may need complete rewrite",
                 "action": "Emergency content refresh required within 7 days"
@@ -688,7 +692,7 @@ class ContentDecayEngine:
         """Suggest internal link updates."""
         return {
             "current_internal_links": inputs.get("internal_links_count", 0),
-            "target_internal_links": "5-8 for comprehensive content",
+            "target_internal_links": "(General industry guidance, unverified): 5-8 for comprehensive content",
             "suggested_additions": [
                 "Link to related pillar content",
                 "Link to supporting cluster content",

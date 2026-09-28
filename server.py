@@ -1521,7 +1521,15 @@ INDEX_HTML=r"""<!DOCTYPE html>
 :root{--bg:#0a0e1a;--s1:#121a2e;--s2:#1a2440;--s3:#233055;--bd:#2b3a61;--bd2:#3c4f7f;--pri:#7c5cfc;--pri2:#b7a6ff;--acc:#22d3ee;--acc2:#7ae8fa;--grn:#34d399;--yel:#fbbf24;--red:#f87171;--pink:#f472b6;--txt:#eef2ff;--txt2:#a9b6d8;--txt3:#6b7a9e;--issue-fill:#ef4444;--issue-ink:#ffffff;--issue-row:rgba(239,68,68,.14);--csh:0 2px 10px rgba(0,0,0,.35)}
 body{font-family:'Google Sans','Roboto',-apple-system,'Segoe UI','Helvetica Neue',Arial,sans-serif;font-size:15px;background:var(--bg);color:var(--txt);overflow:hidden;height:100vh;line-height:1.65;transition:background .3s,color .3s}
 body.light{--bg:#f5f7ff;--s1:#ffffff;--s2:#eef2ff;--s3:#e3e9fb;--bd:#d6def2;--bd2:#b4c0e4;--pri:#6d4ff0;--pri2:#7c5cfc;--acc:#0891b2;--acc2:#0ea5c5;--grn:#059669;--yel:#d97706;--red:#dc2626;--pink:#db2777;--txt:#0f172a;--txt2:#415070;--txt3:#68779b;--issue-fill:#dc2626;--issue-ink:#ffffff;--issue-row:rgba(220,38,38,.10);--csh:0 1px 4px rgba(30,41,80,.10)}
-.app{display:grid;grid-template-columns:340px 1fr;grid-template-rows:56px 1fr;height:100vh}
+.app{display:flex;flex-direction:column;height:100vh}
+.topnav{display:flex;gap:4px;align-items:center;justify-content:center;flex-wrap:wrap;background:var(--s1);border-bottom:1px solid var(--bd);padding:8px 16px}
+.navbtn{padding:8px 18px;border:1px solid transparent;background:transparent;color:var(--txt2);border-radius:8px;cursor:pointer;font-size:.88rem;font-weight:700;font-family:inherit;transition:all .15s}
+.navbtn:hover{background:var(--s2);color:var(--txt)}
+.navbtn.on{background:linear-gradient(135deg,var(--pri),#6d28d9);color:#fff;box-shadow:0 2px 10px rgba(124,92,252,.35)}
+.page{display:none;animation:fadeIn .3s ease}
+.page.on{display:block}
+.input-wrap{max-width:780px;margin:0 auto}
+.input-hero{text-align:center;margin:4px 0 18px}
 .topbar{grid-column:1/-1;background:var(--s1);border-bottom:1px solid var(--bd);display:flex;align-items:center;padding:0 24px;gap:16px;z-index:10;transition:background .3s}
 .topbar .brand{display:flex;flex-direction:column;gap:2px}
 .topbar h1{font-size:1.05rem;font-weight:700;background:linear-gradient(120deg,#a78bfa,#22d3ee);-webkit-background-clip:text;-webkit-text-fill-color:transparent;white-space:nowrap}
@@ -1714,7 +1722,22 @@ tr.dm-click:hover td{background:var(--s3)!important}
 <button class="theme-toggle" onclick="toggleTheme()" title="Toggle Dark/Light Mode"><div class="knob"></div></button>
 </div>
 </div>
-<div class="sidebar">
+<nav class="topnav" id="topnav">
+<button class="navbtn on" id="navAnalyzer" onclick="navAnalyzer(this)">&#129517; Analyzer</button>
+<button class="navbtn" onclick="showPage('about',this)">About the Tool</button>
+<button class="navbtn" onclick="showPage('inputs',this)">Required Inputs</button>
+<button class="navbtn" onclick="showPage('features',this)">Features &amp; Functions</button>
+<button class="navbtn" onclick="showPage('outputs',this)">Outputs</button>
+<button class="navbtn" onclick="showPage('impact',this)">Business Impact</button>
+</nav>
+<div class="main" id="mainArea">
+<div id="sitePages">
+<div class="page on" id="pg-analyzer">
+<div class="input-wrap">
+<div class="input-hero">
+<h2 style="font-size:1.5rem;font-weight:700;background:linear-gradient(120deg,#a78bfa,#22d3ee);-webkit-background-clip:text;-webkit-text-fill-color:transparent">Content Analyzer</h2>
+<p style="font-size:.9rem;color:var(--txt2);margin-top:6px">Fill in either a published URL or the manual inputs below, then run the full 22-module analysis. Everything the tool needs — nothing else on this page.</p>
+</div>
 <div class="mode-divider">&#9679; Analysis Mode</div>
 <details class="url-section" open>
 <summary>&#128279; Analyze Published URL</summary>
@@ -1754,12 +1777,39 @@ tr.dm-click:hover td{background:var(--s3)!important}
 </form>
 <div id="statusBox" style="margin-top:12px"></div>
 </div>
-<div class="main" id="mainArea">
-<div class="info-page" id="infoArea">
+</div>
+<div class="page" id="pg-about">
+<div class="info-page">
 <h2>Welcome to the Intent, Entity & Semantic Intelligence Platform</h2>
 <p>A comprehensive 22-module analysis engine that evaluates your content for both traditional search engines and generative AI engines (ChatGPT, Gemini, Perplexity, Claude). Every module runs on <strong>real, live, verified data</strong> - live SERP results, Wikidata entities, Wayback Machine archives, live competitor page analysis, HTTP/header inspection, structured-data validation, live LLM citation testing (M22 share-of-voice), and verified statistics pulled from the web. Every finding is tied to an actual source. No fabricated numbers.</p>
 <h3>Why This Tool Exists</h3>
 <p>Modern SEO requires optimizing for two audiences: traditional search engines (Google, Bing) and generative AI engines (ChatGPT, Gemini, Perplexity). Most tools only address one. This platform analyzes your content across 22 specialized dimensions to ensure maximum visibility in both ecosystems - and tells you exactly what score to hit to win rankings, AI Overview extraction, and AI citations.</p>
+</div>
+</div>
+<div class="page" id="pg-inputs">
+<div class="info-page">
+<h2>Required Inputs</h2>
+<p>Two analysis modes. URL mode needs just a link; manual mode needs a seed keyword and a primary entity — everything else is optional and has working defaults.</p>
+<h3>Mode A — Published URL (fastest)</h3>
+<table><tr><th>Field</th><th>Required</th><th>What to enter</th><th>How the engine uses it</th></tr>
+<tr><td><strong>Published Blog / Article URL</strong></td><td>Yes (URL mode)</td><td>Full public <span class="str">https://</span> article URL</td><td>Fetched live (SSRF-guarded) and parsed: title, meta, H1/H2s, body text, word/link/image counts, schema presence</td></tr>
+<tr><td><strong>Brand Name</strong></td><td>No</td><td>Your brand</td><td>Brand-compliance and authority checks for the page</td></tr>
+</table>
+<h3>Mode B — Manual Input</h3>
+<table><tr><th>Field</th><th>Required</th><th>What to enter</th><th>How the engine uses it</th></tr>
+<tr><td><strong>Seed Keyword *</strong></td><td>Yes</td><td>Primary target query, e.g. <span class="str">best enterprise B2B SaaS accounting software</span></td><td>Anchors SERP research, briefs, GSC mapping, and intent detection</td></tr>
+<tr><td><strong>Primary Entity *</strong></td><td>Yes</td><td>Main topic/entity, e.g. <span class="str">multi-currency accounting software</span></td><td>Knowledge-graph lookup, schema generation, PR angles, M22 citation prompts</td></tr>
+<tr><td><strong>Brand Website URL</strong></td><td>No</td><td>Brand domain</td><td>Entity and link context for the analysis</td></tr>
+<tr><td><strong>Brand Name</strong></td><td>No (default set)</td><td>Your brand</td><td>Voice, terminology, and regulated-claim compliance</td></tr>
+<tr><td><strong>Locale / Device</strong></td><td>No (en-US / Desktop)</td><td>Target market &amp; device</td><td>Localized SERP, hreflang plan, mobile vs desktop checks</td></tr>
+<tr><td><strong>Funnel / Knowledge / Voice</strong></td><td>No (defaults set)</td><td>Audience profile</td><td>Branches blueprints, prompt sets, and reading-level targets</td></tr>
+<tr><td><strong>Secondary Keywords</strong></td><td>No</td><td>Comma-separated extras</td><td>Tracker queries, brief coverage, content-gap mapping</td></tr>
+<tr><td><strong>Blacklist / SME notes</strong></td><td>No</td><td>Banned terms | expert quotes</td><td>Compliance enforcement + E-E-A-T quote placement</td></tr>
+</table>
+</div>
+</div>
+<div class="page" id="pg-features">
+<div class="info-page">
 <h3>What This Tool Does</h3>
 <p>Runs 22 specialized analysis modules covering SERP analysis, GEO/AEO simulation, semantic structuring, E-E-A-T profiling, content decay detection, CDN edge preview, live LLM citation testing, and more. Each module outputs three layers:</p>
 <ol class="steps">
@@ -1767,6 +1817,15 @@ tr.dm-click:hover td{background:var(--s3)!important}
 <li><strong>Score Benchmarks</strong> - the exact target/good/excellent thresholds for each score, with what each level means for rankings, AI Overviews, and AI citations.</li>
 <li><strong>Recommendations & Action Plan</strong> - what to do, when to do it, which tools to use, and a ready-made A/B test plan to prove the change works.</li>
 </ol>
+<h3>Platform Functions &amp; Sub-Functions</h3>
+<div class="feature-grid">
+<div class="feature-card"><h4>Dual Content Score</h4><p>SEO + GEO score for any draft with must-include terms and competitor comparison (<span class="str">/api/score</span>).</p></div>
+<div class="feature-card"><h4>SERP Brief Generator</h4><p>Outline, word targets, and questions derived from live SERP results (<span class="str">/api/brief</span>).</p></div>
+<div class="feature-card"><h4>GSC Quick-Wins</h4><p>CSV upload → striking distance, decay, cannibalization; OAuth live mode when configured.</p></div>
+<div class="feature-card"><h4>LLM Citation Testing</h4><p>M22 prompts ChatGPT, Gemini, Perplexity &amp; Claude; nightly SOV history per entity.</p></div>
+<div class="feature-card"><h4>Action Center</h4><p>Every recommendation as an assignable task with CSV, Jira, and Linear export.</p></div>
+<div class="feature-card"><h4>Share, PDF &amp; Agents</h4><p>OTP-verified email, versioned share links, slim PDF, JSON artifact, OpenAPI + MCP endpoint.</p></div>
+</div>
 <h3>Modules Overview</h3>
 <div class="feature-grid">
 <div class="feature-card" onclick="showModuleInfo('M01')"><h4>M01: SERP & Knowledge Graph</h4><p>Analyze SERP features, entity graphs, and Knowledge Panel opportunities. <b style="color:var(--acc2)">Click for details &rarr;</b></p></div>
@@ -1792,14 +1851,19 @@ tr.dm-click:hover td{background:var(--s3)!important}
 <div class="feature-card" onclick="showModuleInfo('M21')"><h4>M21: DOM Inspector</h4><p>Analyze DOM structure, layout shifts, and performance impact. <b style="color:var(--acc2)">Click for details &rarr;</b></p></div>
 <div class="feature-card" onclick="showModuleInfo('M22')"><h4>M22: Live LLM Citation Tester</h4><p>Prompt ChatGPT, Gemini, Perplexity &amp; Claude live — transcripts, citations, sentiment, share-of-voice. <b style="color:var(--acc2)">Click for details &rarr;</b></p></div>
 </div>
-<h3>What You Need</h3>
-<ul>
-<li><strong>Seed Keyword</strong> - Your primary target keyword or phrase</li>
-<li><strong>Primary Entity</strong> - The main entity/topic your content covers</li>
-<li><strong>Brand Name</strong> - Your brand for compliance and authority checks</li>
-<li><strong>Audience Profile</strong> - Funnel stage, knowledge level, and voice preference</li>
-<li><strong>Page URL (optional)</strong> - Paste a URL for real DOM, schema, header, link, and page-content analysis (recommended for maximum depth)</li>
-</ul>
+</div>
+</div>
+<div class="page" id="pg-outputs">
+<div class="info-page">
+<h2>Outputs You Can Expect</h2>
+<p>One run produces five compiled blueprints plus the executive summary and all 22 module reports. Each blueprint is a different cut of the same verified findings:</p>
+<table><tr><th>Blueprint</th><th>What it contains</th></tr>
+<tr><td><strong>Editorial &amp; Writing</strong></td><td>H1, H2/H3 outline with word targets, 40–60-word answer blocks, SME quote placements, information-gain checklist</td></tr>
+<tr><td><strong>GEO &amp; AEO Optimization</strong></td><td>Readiness score, RAG chunk plan, per-engine strategies, citation triggers, required sources</td></tr>
+<tr><td><strong>Technical Payload</strong></td><td>Copy-ready JSON-LD schemas, validation results, internal-link blueprint, cannibalization status</td></tr>
+<tr><td><strong>CDN &amp; Edge Deployment</strong></td><td>Edge-worker snippet, live header inspection, pre-render simulation, deployment guide</td></tr>
+<tr><td><strong>Post-Publish Sentinel</strong></td><td>Monitoring targets, alert rules, refresh brief, A/B designs, rollback guardrails</td></tr>
+</table>
 <h3>What You Get</h3>
 <ul>
 <li><strong>Executive Summary</strong> - High-level overview with critical issues and priorities</li>
@@ -1815,8 +1879,25 @@ tr.dm-click:hover td{background:var(--s3)!important}
 <li><strong>Raw JSON</strong> - Complete data export for programmatic use, plus downloadable JSON artifact and versioned share links</li>
 <li><strong>Action Center</strong> - Every recommendation as an assignable task (priority / effort / owner) with CSV, Jira, and Linear export</li>
 </ul>
-<p style="margin-top:24px;color:var(--pri2);font-weight:600;font-size:.95rem">Enter your seed keyword and entity in the sidebar, then click <strong>Run 22-Module Analysis</strong> to begin. Every result is generated from real-time research - click any number, row, or value for the full underlying detail.</p>
 </div>
+</div>
+<div class="page" id="pg-impact">
+<div class="info-page">
+<h2>Business Impact</h2>
+<p>What changes when content ships with this analysis behind it. Stated as mechanisms, not miracles — every claim below maps to a module output, and nothing here promises a ranking.</p>
+<div class="feature-grid">
+<div class="feature-card"><h4>Win Classic Search</h4><p>Briefs built from live SERP gaps, validated schema, decay refreshes, and internal-link repair feed the inputs rankings are decided on.</p></div>
+<div class="feature-card"><h4>Get Cited by AI Answers</h4><p>40–60-word answer blocks, FAQ schema, and sourced statistics raise extractability; M22 measures citation share-of-voice over time.</p></div>
+<div class="feature-card"><h4>Recover Zero-Click Losses</h4><p>GSC quick-wins separate AI-Overview impressions from classic clicks so you can see — and respond to — zero-click erosion.</p></div>
+<div class="feature-card"><h4>Ship Faster as a Team</h4><p>One run replaces a stack of checkers; the Action Center turns findings into owned Jira/Linear tasks with effort estimates.</p></div>
+<div class="feature-card"><h4>Protect the Brand</h4><p>Regulated-claim scans, trademark enforcement, and OTP-gated sharing keep compliance and distribution under control.</p></div>
+<div class="feature-card"><h4>Compound the Moat</h4><p>Nightly tracker snapshots, off-site authority building, and refresh briefs turn one audit into a durable visibility program.</p></div>
+</div>
+<p style="margin-top:24px;color:var(--pri2);font-weight:600;font-size:.95rem">Start on the <strong>Analyzer</strong> page — enter your seed keyword and entity, then click <strong>Run 22-Module Analysis</strong>. Every result is generated from real-time research.</p>
+</div>
+</div>
+</div>
+<div id="resultsView" class="hidden"></div>
 </div>
 </div>
 
@@ -2082,7 +2163,7 @@ btn.disabled=false;btn.textContent='Run 22-Module Analysis';
 });
 
 function renderAll(data){
-const ma=document.getElementById('mainArea');
+const ma=document.getElementById('resultsView');
 const b=data.blueprint||{};
 const mr=data.module_results||{};
 const ud=data._url_data||null;
@@ -2122,10 +2203,16 @@ panels+=`<div class="panel" id="p_raw">
 <div class="card"><h3>Full Module Results JSON</h3>
 <button class="json-toggle" onclick="this.nextElementSibling.classList.toggle('open');this.textContent=this.nextElementSibling.classList.contains('open')?'Hide Module JSON':'Show Module JSON'">&#128196; Show Module Results JSON</button>
 <div class="json-content"><pre><code id="rawMrCode"></code></pre><button class="btn" style="margin-top:8px;background:var(--txt);color:var(--bg);width:auto;padding:7px 16px;font-size:.82rem" onclick="copyText(JSON.stringify(window._rawMr,null,2))">Copy Module JSON</button></div></div></div>`;
-ma.innerHTML=tabs+panels;
+ma.innerHTML=`<button class="btn btn-url" style="width:auto;padding:9px 18px;margin-bottom:14px" onclick="backToSite()">&#8592; New Analysis</button>`+tabs+panels;
 document.getElementById('rawBCode').innerHTML=hl(JSON.stringify(b,null,2));
 document.getElementById('rawMrCode').innerHTML=hl(JSON.stringify(mr,null,2));
+showResultsView();
 }
+
+function showPage(id,el){document.querySelectorAll('.navbtn').forEach(t=>t.classList.remove('on'));if(el)el.classList.add('on');document.getElementById('resultsView').classList.add('hidden');document.getElementById('sitePages').classList.remove('hidden');document.querySelectorAll('.page').forEach(p=>p.classList.remove('on'));const p=document.getElementById('pg-'+id);if(p)p.classList.add('on');const m=document.getElementById('mainArea');if(m)m.scrollTop=0;}
+function showResultsView(){document.getElementById('sitePages').classList.add('hidden');document.getElementById('resultsView').classList.remove('hidden');document.querySelectorAll('.navbtn').forEach(t=>t.classList.remove('on'));const nb=document.getElementById('navAnalyzer');if(nb)nb.classList.add('on');const m=document.getElementById('mainArea');if(m)m.scrollTop=0;}
+function navAnalyzer(el){if(window._lastResults&&document.getElementById('resultsView').innerHTML.trim()){showResultsView();document.querySelectorAll('.navbtn').forEach(t=>t.classList.remove('on'));if(el)el.classList.add('on');const nb=document.getElementById('navAnalyzer');if(nb)nb.classList.add('on');}else{showPage('analyzer',el);}}
+function backToSite(){showPage('analyzer',document.getElementById('navAnalyzer'));}
 
 function showTab(id,el){document.querySelectorAll('.tab').forEach(t=>t.classList.remove('on'));document.querySelectorAll('.panel').forEach(p=>p.classList.remove('on'));const btn=el||(typeof event!=='undefined'&&event?(event.currentTarget||(event.target&&event.target.closest?event.target.closest('.tab'):null)):null);if(btn)btn.classList.add('on');const p=document.getElementById('p_'+id);if(p)p.classList.add('on');}
 
